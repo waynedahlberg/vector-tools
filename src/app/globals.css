@@ -378,10 +378,10 @@
     syntax: "<number>";
     inherits: false;
     initial-value: 1;}
-/* Floating panels over the viewport. Opacity and blur are variables so they can be tuned live. */
+/* Floating panels over the viewport: translucent, with the viewport blurred behind them. */
 :root {
-  --panel-alpha: 0.95;
-  --panel-blur: 12px;
+  --panel-alpha: 0.5;
+  --panel-blur: 10px;
 }
 .panel-glass {
   background-color: color-mix(in srgb, var(--surface-2) calc(var(--panel-alpha) * 100%), transparent);

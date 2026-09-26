@@ -9,7 +9,6 @@ import { SourcePanel } from "./source-panel";
 import { OutputPanel } from "./output-panel";
 import { HISTORY_COLLAPSED, HISTORY_EXPANDED, HistoryDock } from "./history-panel";
 import { useOptionsHistory } from "./use-options-history";
-import { GlassTuner } from "./glass-tuner";
 import type { Insets, ViewportApi } from "./viewport-3d";
 import { DEFAULT_OPTIONS, GEOMETRY_MODIFIERS, PER_FILE_OPTIONS, prepare, toStep, type ConvertOptions, type Prepared } from "@/lib/convert";
 import { addHistory, clearHistory, deleteHistory, listHistory, type HistoryEntry } from "@/lib/history";
@@ -335,8 +334,6 @@ function Workspace() {
         }}
         style={panelStyle}
       />
-      {/* TEMP: remove once panel opacity/blur are settled. */}
-      <GlassTuner top={panelTop} />
       <HistoryDock
         entries={history}
         error={historyError}
