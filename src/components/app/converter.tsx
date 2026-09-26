@@ -10,11 +10,18 @@ import { Dropzone, SvgFileInput, readSvgFile, type LoadedFile } from "./dropzone
 import { Preview } from "./preview";
 import { OptionsPanel } from "./options-panel";
 import { HistoryPanel } from "./history-panel";
+import dynamic from "next/dynamic";
 import { DEFAULT_OPTIONS, prepare, toStep, type ConvertOptions, type Prepared } from "@/lib/convert";
 import { addHistory, clearHistory, deleteHistory, listHistory, type HistoryEntry } from "@/lib/history";
 import { downloadText, formatBytes, formatSize } from "@/lib/format";
 
 const OPTIONS_KEY = "svg2step:options";
+
+// three.js only loads once a file is open, and never during prerender.
+const Viewport3D = dynamic(() => import("./viewport-3d").then((m) => m.Viewport3D), {
+  ssr: false,
+  loading: () => <div className="aspect-[16/10] w-full animate-pulse rounded-2xl bg-surface-2 shadow-surface-2" />,
+});
 
 type Result = { step: string; fileName: string; entry: HistoryEntry };
 
@@ -270,6 +277,9 @@ export function Converter() {
                 </ul>
               )}
             </div>
+          )}
+          {file && prepared && (
+            <Viewport3D prepared={prepared} options={options} fileKey={`${file.name}:${file.svg.length}`} />
           )}
         </div>
 

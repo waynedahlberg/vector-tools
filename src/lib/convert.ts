@@ -56,6 +56,10 @@ export type Prepared = {
   sizeNote: string;
   /** SVG path data for previewing the final geometry (Y flipped back for display). */
   previewPaths: { d: string; closed: boolean }[];
+  /** Output geometry sampled as it will be exported, in output units (Y up). */
+  polylines: { pts: Pt[]; closed: boolean }[];
+  /** Face outlines and holes for filled previews, matching `regions`. */
+  regionPolys: { outer: Pt[]; holes: Pt[][] }[];
 };
 
 const MM_PER_UNIT: Record<OutputUnit, number> = { mm: 1, in: 25.4 };
@@ -116,13 +120,14 @@ function nesting(polys: Pt[][]): { depth: number[]; parent: number[] } {
   return { depth, parent };
 }
 
-function buildRegions(closed: Shape[], depth: number[], parent: number[]): Region[] {
-  const regions = new Map<number, Region>();
-  closed.forEach((s, i) => {
-    if (depth[i] % 2 === 0) regions.set(i, { outer: s, holes: [] });
+/** Group closed shapes (by index into the full shape list) into outer boundaries and holes. */
+function buildRegions(closed: number[], depth: number[], parent: number[]): { outer: number; holes: number[] }[] {
+  const regions = new Map<number, { outer: number; holes: number[] }>();
+  closed.forEach((shapeIdx, n) => {
+    if (depth[n] % 2 === 0) regions.set(n, { outer: shapeIdx, holes: [] });
   });
-  closed.forEach((s, i) => {
-    if (depth[i] % 2 === 1) regions.get(parent[i])?.holes.push(s);
+  closed.forEach((shapeIdx, n) => {
+    if (depth[n] % 2 === 1) regions.get(parent[n])?.holes.push(shapeIdx);
   });
   return [...regions.values()];
 }
@@ -165,8 +170,6 @@ export function prepare(markup: string, opts: ConvertOptions): Prepared {
   const tol = Math.max(size * previewTol, 1e-6);
   const polys = shapes.map((s) => flatten(s, tol));
   bounds = boundsOf(polys);
-  // Polyline previews show the actual chords that will be exported.
-  const shown = opts.curveMode === "polyline" ? shapes.map((s) => flatten(s, opts.tolerance)) : polys;
 
   const isClosed = (s: Shape) => s.type === "ellipse" || s.closed;
   const closedIdx = shapes.map((s, i) => (isClosed(s) ? i : -1)).filter((i) => i >= 0);
@@ -182,10 +185,12 @@ export function prepare(markup: string, opts: ConvertOptions): Prepared {
     shapes[shapeIdx] = smoothSeam(s as PathShape);
   });
 
-  const regions =
-    opts.output === "curves"
-      ? []
-      : buildRegions(closedIdx.map((i) => shapes[i]), depth, parent);
+  // Previews show what will be exported: the actual chords in polyline mode, and finely
+  // sampled curves otherwise. Flattened after seam/direction fixes so vertices match.
+  const shown = shapes.map((s) => flatten(s, opts.curveMode === "polyline" ? opts.tolerance : tol));
+
+  const regionIdx = opts.output === "curves" ? [] : buildRegions(closedIdx, depth, parent);
+  const regions: Region[] = regionIdx.map((r) => ({ outer: shapes[r.outer], holes: r.holes.map((h) => shapes[h]) }));
 
   const warnings = [...parsed.warnings];
   const openCount = shapes.length - closedIdx.length;
@@ -207,6 +212,8 @@ export function prepare(markup: string, opts: ConvertOptions): Prepared {
     unitsPerUserUnit: k,
     sizeNote: note,
     previewPaths: shapes.map((s, i) => ({ d: toPathD(shown[i], isClosed(s)), closed: isClosed(s) })),
+    polylines: shapes.map((s, i) => ({ pts: shown[i], closed: isClosed(s) })),
+    regionPolys: regionIdx.map((r) => ({ outer: shown[r.outer], holes: r.holes.map((h) => shown[h]) })),
   };
 }
 
