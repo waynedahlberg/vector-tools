@@ -1,14 +1,38 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { TabsSubtle, TabsSubtleItem } from "@/components/ui/tabs-subtle";
+import { useMemo } from "react";
 import type { Prepared, ConvertOptions } from "@/lib/convert";
 
-function GeometryView({ prepared, options }: { prepared: Prepared; options: ConvertOptions }) {
-  const b = prepared.bounds;
-  if (!b) {
-    return <p className="text-[13px] text-muted-foreground">Nothing to preview.</p>;
-  }
+/** Flat, top-down view of the detected output geometry. Fills its parent. */
+export function GeometryView2D({ prepared, options }: { prepared: Prepared | null; options: ConvertOptions }) {
+  const b = prepared?.bounds;
+  const legend = [
+    { label: "Closed", swatch: "bg-foreground" },
+    { label: "Open", swatch: "bg-[#f97316]" },
+    ...(options.output !== "curves" ? [{ label: "Face", swatch: "bg-[#3b82f6]/30" }] : []),
+  ];
+
+  return (
+    <div className="preview-grid relative flex h-full w-full items-center justify-center bg-surface-1 p-6">
+      {!prepared || !b ? (
+        <p className="text-[13px] text-muted-foreground">Nothing to preview.</p>
+      ) : (
+        <Drawing prepared={prepared} options={options} />
+      )}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-3 p-3 text-[11px] text-muted-foreground">
+        {legend.map((l) => (
+          <span key={l.label} className="flex items-center gap-1.5">
+            <span className={`h-2 w-2 rounded-full ${l.swatch}`} />
+            {l.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Drawing({ prepared, options }: { prepared: Prepared; options: ConvertOptions }) {
+  const b = prepared.bounds!;
   const w = Math.max(b.maxX - b.minX, 1e-6);
   const h = Math.max(b.maxY - b.minY, 1e-6);
   const pad = Math.max(w, h) * 0.06;
@@ -20,9 +44,7 @@ function GeometryView({ prepared, options }: { prepared: Prepared; options: Conv
 
   return (
     <svg viewBox={vb.join(" ")} className="h-full w-full" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Detected geometry">
-      {showFaces && closedD && (
-        <path d={closedD} fillRule="evenodd" className="fill-[#3b82f6]/15" stroke="none" />
-      )}
+      {showFaces && closedD && <path d={closedD} fillRule="evenodd" className="fill-[#3b82f6]/15" stroke="none" />}
       {prepared.previewPaths.map((p, i) => (
         <path
           key={i}
@@ -36,68 +58,20 @@ function GeometryView({ prepared, options }: { prepared: Prepared; options: Conv
         />
       ))}
       {/* Origin marker: X in red, Y in green, as in most CAD tools. */}
-      <g vectorEffect="non-scaling-stroke">
-        <line x1={0} y1={0} x2={axis} y2={0} stroke="#ef4444" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
-        <line x1={0} y1={0} x2={0} y2={-axis} stroke="#22c55e" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
-      </g>
+      <line x1={0} y1={0} x2={axis} y2={0} stroke="#ef4444" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+      <line x1={0} y1={0} x2={0} y2={-axis} stroke="#22c55e" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
     </svg>
   );
 }
 
-export function Preview({
-  svg,
-  prepared,
-  options,
-}: {
-  svg: string;
-  prepared: Prepared | null;
-  options: ConvertOptions;
-}) {
-  const [tab, setTab] = useState(0);
+/** The uploaded artwork as the browser renders it. Fills its parent. */
+export function OriginalView({ svg }: { svg: string }) {
   // Rendered through <img>, so any scripts in the SVG never run.
   const url = useMemo(() => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`, [svg]);
-
-  const legend = useMemo(
-    () => [
-      { label: "Closed", swatch: "bg-foreground" },
-      { label: "Open", swatch: "bg-[#f97316]" },
-      ...(options.output !== "curves" ? [{ label: "Face", swatch: "bg-[#3b82f6]/30" }] : []),
-    ],
-    [options.output]
-  );
-
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-3">
-        <TabsSubtle selectedIndex={tab} onSelect={setTab} idPrefix="preview">
-          <TabsSubtleItem index={0} label="Detected geometry" />
-          <TabsSubtleItem index={1} label="Original" />
-        </TabsSubtle>
-        {tab === 0 && (
-          <div className="hidden items-center gap-3 text-[12px] text-muted-foreground sm:flex">
-            {legend.map((l) => (
-              <span key={l.label} className="flex items-center gap-1.5">
-                <span className={`h-2 w-2 rounded-full ${l.swatch}`} />
-                {l.label}
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-      <div className="preview-grid relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-xl bg-surface-1 p-4 shadow-surface-1">
-        {tab === 0 ? (
-          prepared ? (
-            <GeometryView prepared={prepared} options={options} />
-          ) : (
-            <p className="text-[13px] text-muted-foreground">Preview unavailable.</p>
-          )
-        ) : (
-          url && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={url} alt="Original SVG" className="max-h-full max-w-full object-contain" />
-          )
-        )}
-      </div>
+    <div className="preview-grid flex h-full w-full items-center justify-center bg-surface-1 p-6">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={url} alt="Original SVG" className="max-h-full max-w-full object-contain" />
     </div>
   );
 }

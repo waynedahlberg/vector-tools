@@ -2,28 +2,20 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowRight, Check, Download, FileCode2, Redo2, RefreshCw, RotateCcw, Undo2, X } from "lucide-react";
+import { ArrowRight, Check, Download, FileCode2, Redo2, RotateCcw, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip } from "@/components/ui/tooltip";
-import { Dropzone, SvgFileInput, readSvgFile, type LoadedFile } from "./dropzone";
-import { Preview } from "./preview";
+import { readSvgFile, type LoadedFile } from "./dropzone";
+import { Stage } from "./stage";
 import { OptionsPanel } from "./options-panel";
 import { HistoryPanel } from "./history-panel";
 import { useOptionsHistory } from "./use-options-history";
-import { ProblemsList } from "./problems-list";
-import dynamic from "next/dynamic";
 import { DEFAULT_OPTIONS, GEOMETRY_MODIFIERS, PER_FILE_OPTIONS, prepare, toStep, type ConvertOptions, type Prepared } from "@/lib/convert";
 import { addHistory, clearHistory, deleteHistory, listHistory, type HistoryEntry } from "@/lib/history";
 import { downloadText, formatBytes, formatSize } from "@/lib/format";
 
 const OPTIONS_KEY = "svg2step:options";
-
-// three.js only loads once a file is open, and never during prerender.
-const Viewport3D = dynamic(() => import("./viewport-3d").then((m) => m.Viewport3D), {
-  ssr: false,
-  loading: () => <div className="aspect-[16/10] w-full animate-pulse rounded-2xl bg-surface-2 shadow-surface-2" />,
-});
 
 type Result = { step: string; fileName: string; entry: HistoryEntry };
 
@@ -58,8 +50,7 @@ export function Converter() {
   const [converting, setConverting] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [historyError, setHistoryError] = useState<string | null>(null);
-  const replaceInputRef = useRef<HTMLInputElement>(null);
-  const pageDragDepth = useRef(0);
+  const [dragging, setDragging] = useState(false);
 
   // Remember the last-used options in this browser as a convenience. They're read after
   // mount, because the page is prerendered and localStorage only exists on the client.
@@ -165,25 +156,55 @@ export function Converter() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const onPageDrop = async (ev: React.DragEvent) => {
-    if (!file) return; // the dropzone handles the empty state
-    ev.preventDefault();
-    pageDragDepth.current = 0;
-    const f = ev.dataTransfer.files?.[0];
-    if (!f) return;
-    try {
-      loadFile(await readSvgFile(f));
-    } catch (err) {
-      setLoadError((err as Error).message);
-    }
-  };
+  // Files dropped anywhere in the window open, and dragging shows the stage's drop overlay.
+  // Without this, a file dropped outside the drop zone would make the browser navigate to it.
+  const loadFileRef = useRef(loadFile);
+  useEffect(() => {
+    loadFileRef.current = loadFile;
+  });
+  useEffect(() => {
+    let depth = 0;
+    const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
+    const onEnter = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      depth++;
+      setDragging(true);
+    };
+    const onLeave = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) setDragging(false);
+    };
+    const onOver = (e: DragEvent) => {
+      if (hasFiles(e)) e.preventDefault();
+    };
+    const onDrop = async (e: DragEvent) => {
+      depth = 0;
+      setDragging(false);
+      if (e.defaultPrevented) return; // the empty-state drop zone already handled it
+      e.preventDefault();
+      const f = e.dataTransfer?.files?.[0];
+      if (!f) return;
+      try {
+        loadFileRef.current(await readSvgFile(f));
+      } catch (err) {
+        setLoadError((err as Error).message);
+      }
+    };
+    window.addEventListener("dragenter", onEnter);
+    window.addEventListener("dragleave", onLeave);
+    window.addEventListener("dragover", onOver);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      window.removeEventListener("dragenter", onEnter);
+      window.removeEventListener("dragleave", onLeave);
+      window.removeEventListener("dragover", onOver);
+      window.removeEventListener("drop", onDrop);
+    };
+  }, []);
 
   return (
-    <div
-      className="mx-auto flex w-full max-w-6xl flex-col gap-10 px-4 pb-16 pt-8 sm:px-6 sm:pt-12"
-      onDragOver={(e) => file && e.preventDefault()}
-      onDrop={onPageDrop}
-    >
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-10 px-4 pb-16 pt-8 sm:px-6 sm:pt-12">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center gap-2.5">
@@ -203,73 +224,21 @@ export function Converter() {
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="flex min-w-0 flex-col gap-4">
-          {!file ? (
-            <Dropzone onFile={loadFile} error={loadError} onError={setLoadError} />
-          ) : (
-            <div className="flex flex-col gap-4 rounded-2xl bg-surface-2 p-4 shadow-surface-2 sm:p-5">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex min-w-0 flex-col">
-                  <span className="truncate text-[14px] font-medium text-foreground">{file.name}</span>
-                  <span className="text-[12px] text-muted-foreground">
-                    {formatBytes(new Blob([file.svg]).size)} SVG · drop another file anywhere to replace
-                  </span>
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <Button variant="secondary" size="sm" leadingIcon={RefreshCw} onClick={() => replaceInputRef.current?.click()}>
-                    Replace
-                  </Button>
-                  <Tooltip content="Close file">
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label="Close file"
-                      onClick={() => {
-                        setFile(null);
-                        setResult(null);
-                        setLoadError(null);
-                      }}
-                    >
-                      <X />
-                    </Button>
-                  </Tooltip>
-                  <SvgFileInput inputRef={replaceInputRef} onFile={loadFile} onError={setLoadError} />
-                </div>
-              </div>
-
-              <Preview svg={file.svg} prepared={prepared} options={options} />
-
-              {prepared && (
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <Badge size="sm" variant="dot" color="gray">
-                    {prepared.shapes.length} {prepared.shapes.length === 1 ? "path" : "paths"}
-                  </Badge>
-                  <Badge size="sm" variant="dot" color="blue">
-                    {prepared.closedCount} closed
-                  </Badge>
-                  {prepared.openCount > 0 && (
-                    <Badge size="sm" variant="dot" color="orange">
-                      {prepared.openCount} open
-                    </Badge>
-                  )}
-                  {options.output !== "curves" && (
-                    <Badge size="sm" variant="dot" color="emerald">
-                      {prepared.regions.length} {prepared.regions.length === 1 ? "face" : "faces"}
-                    </Badge>
-                  )}
-                </div>
-              )}
-
-              <ProblemsList
-                prepared={prepared}
-                options={options}
-                errors={[prepareError, loadError].filter((e): e is string => !!e)}
-                onFix={updateOptions}
-              />
-            </div>
-          )}
-          {file && prepared && (
-            <Viewport3D prepared={prepared} options={options} fileKey={`${file.name}:${file.svg.length}`} />
-          )}
+          <Stage
+            file={file}
+            prepared={prepared}
+            options={options}
+            errors={[prepareError, loadError].filter((e): e is string => !!e)}
+            dragging={dragging}
+            onFile={loadFile}
+            onError={setLoadError}
+            onClose={() => {
+              setFile(null);
+              setResult(null);
+              setLoadError(null);
+            }}
+            onFix={updateOptions}
+          />
         </div>
 
         <aside className="flex flex-col gap-4 lg:sticky lg:top-6 lg:self-start">

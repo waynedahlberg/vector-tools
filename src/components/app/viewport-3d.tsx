@@ -1,14 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
-import { Maximize, Box, Square, Waypoints } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Tooltip } from "@/components/ui/tooltip";
 import type { ConvertOptions, Prepared } from "@/lib/convert";
 import type { Pt } from "@/lib/geometry";
 import { planeMap, type DrawingPlane } from "@/lib/step-writer";
@@ -122,19 +119,41 @@ type Scene = {
   frame: { center: THREE.Vector3; radius: number } | null;
 };
 
+/** Camera commands for toolbars that live outside the canvas. */
+export type ViewportApi = { view: (mode: "face" | "iso" | "fit") => void };
+
+/** The 3D preview canvas. It fills its parent; toolbars drive it through `apiRef`. */
 export function Viewport3D({
   prepared,
   options,
   fileKey,
+  showSeams,
+  apiRef,
 }: {
   prepared: Prepared | null;
   options: ConvertOptions;
   fileKey: string;
+  showSeams: boolean;
+  apiRef?: RefObject<ViewportApi | null>;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<Scene | null>(null);
   const lastFit = useRef<{ key: string; center: THREE.Vector3; radius: number } | null>(null);
-  const [showSeams, setShowSeams] = useState(false);
+  const planeRef = useRef(options.plane);
+  useEffect(() => {
+    planeRef.current = options.plane;
+  }, [options.plane]);
+
+  useEffect(() => {
+    if (!apiRef) return;
+    apiRef.current = {
+      view: (mode) =>
+        sceneRef.current?.fit(mode === "face" ? faceOnDir(planeRef.current) : mode === "iso" ? ISO_DIR : undefined),
+    };
+    return () => {
+      apiRef.current = null;
+    };
+  }, [apiRef]);
   const gridLabel = prepared?.bounds ? `${+gridStepFor(prepared.bounds).toPrecision(3)} ${options.unit}` : "";
 
   // One-time renderer, camera and controls setup.
@@ -409,87 +428,47 @@ export function Viewport3D({
     s.invalidate();
   }, [prepared, options.output, options.curveMode, options.unit, options.plane, fileKey, showSeams]);
 
-  const view = (dir?: THREE.Vector3) => sceneRef.current?.fit(dir);
-
   return (
-    <div className="flex flex-col gap-3 rounded-2xl bg-surface-2 p-4 shadow-surface-2 sm:p-5">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 flex-col">
-          <span className="text-[14px] font-medium text-foreground">3D preview</span>
-          <span className="text-[12px] text-muted-foreground">
-            Output geometry on the {options.plane.toUpperCase()} plane, Z up
+    <div className="relative h-full w-full overflow-hidden bg-[#17191d]">
+      <div
+        ref={hostRef}
+        className="h-full w-full cursor-grab active:cursor-grabbing data-[no-webgl=true]:flex data-[no-webgl=true]:cursor-default data-[no-webgl=true]:items-center data-[no-webgl=true]:justify-center data-[no-webgl=true]:text-[13px] data-[no-webgl=true]:text-white/60"
+      />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 p-3 text-[11px] text-white/55">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="flex items-center gap-1.5">
+            <span className="h-0.5 w-3 rounded-full bg-[#e5484d]" />X
           </span>
-        </div>
-        <div className="flex shrink-0 items-center gap-0.5">
-          <Tooltip content={showSeams ? "Hide start points & direction" : "Show start points & direction"}>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Show start points and direction"
-              aria-pressed={showSeams}
-              active={showSeams}
-              onClick={() => setShowSeams((v) => !v)}
-            >
-              <Waypoints />
-            </Button>
-          </Tooltip>
-          <Tooltip content="Face-on view">
-            <Button variant="ghost" size="icon-sm" aria-label="Face-on view" onClick={() => view(faceOnDir(options.plane))}>
-              <Square />
-            </Button>
-          </Tooltip>
-          <Tooltip content="Isometric view">
-            <Button variant="ghost" size="icon-sm" aria-label="Isometric view" onClick={() => view(ISO_DIR)}>
-              <Box />
-            </Button>
-          </Tooltip>
-          <Tooltip content="Fit to view">
-            <Button variant="ghost" size="icon-sm" aria-label="Fit to view" onClick={() => view()}>
-              <Maximize />
-            </Button>
-          </Tooltip>
-        </div>
-      </div>
-      <div className="relative overflow-hidden rounded-xl shadow-surface-1">
-        <div
-          ref={hostRef}
-          className="aspect-[16/10] w-full cursor-grab bg-[#17191d] active:cursor-grabbing data-[no-webgl=true]:flex data-[no-webgl=true]:cursor-default data-[no-webgl=true]:items-center data-[no-webgl=true]:justify-center data-[no-webgl=true]:text-[13px] data-[no-webgl=true]:text-white/60"
-        />
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 p-3 text-[11px] text-white/55">
-          <div className="flex items-center gap-3">
+          <span className="flex items-center gap-1.5">
+            <span className="h-0.5 w-3 rounded-full bg-[#46a758]" />Y
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-0.5 w-3 rounded-full bg-[#3e8ef7]" />Z
+          </span>
+          <span>{options.plane.toUpperCase()} plane</span>
+          {gridLabel && <span className="tabular-nums">Grid {gridLabel}</span>}
+          {!!prepared?.problems.openEnds.length && (
             <span className="flex items-center gap-1.5">
-              <span className="h-0.5 w-3 rounded-full bg-[#e5484d]" />X
+              <span className="size-2 rounded-full bg-[#ffb224]" />Open end
             </span>
+          )}
+          {!!prepared?.problems.selfIntersections.length && (
             <span className="flex items-center gap-1.5">
-              <span className="h-0.5 w-3 rounded-full bg-[#46a758]" />Y
+              <span className="size-2 rounded-full bg-[#ff4d4f]" />Crossing
             </span>
+          )}
+          {!!prepared?.ghost.length && (
             <span className="flex items-center gap-1.5">
-              <span className="h-0.5 w-3 rounded-full bg-[#3e8ef7]" />Z
+              <span className="h-px w-3 bg-[#6b7280]" />Original
             </span>
-            {gridLabel && <span className="tabular-nums">Grid {gridLabel}</span>}
-            {!!prepared?.problems.openEnds.length && (
-              <span className="flex items-center gap-1.5">
-                <span className="size-2 rounded-full bg-[#ffb224]" />Open end
-              </span>
-            )}
-            {!!prepared?.problems.selfIntersections.length && (
-              <span className="flex items-center gap-1.5">
-                <span className="size-2 rounded-full bg-[#ff4d4f]" />Crossing
-              </span>
-            )}
-            {!!prepared?.ghost.length && (
-              <span className="flex items-center gap-1.5">
-                <span className="h-px w-3 bg-[#6b7280]" />Original
-              </span>
-            )}
-            {!!prepared?.repairs.joins.length && (
-              <span className="flex items-center gap-1.5">
-                <span className="size-2 rounded-full bg-[#30d158]" />Joined
-              </span>
-            )}
-          </div>
-          <span className="hidden text-right sm:block">Drag to orbit · Right-drag to pan · Scroll to zoom</span>
+          )}
+          {!!prepared?.repairs.joins.length && (
+            <span className="flex items-center gap-1.5">
+              <span className="size-2 rounded-full bg-[#30d158]" />Joined
+            </span>
+          )}
         </div>
+        <span className="hidden shrink-0 text-right lg:block">Drag to orbit · Right-drag to pan · Scroll to zoom</span>
       </div>
     </div>
   );
