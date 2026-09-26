@@ -4,6 +4,7 @@ import { useRef, useState, useSyncExternalStore } from "react";
 import { Grid3x3, Hand, ZoomIn } from "lucide-react";
 import { Tooltip } from "@/components/ui/tooltip";
 import { projectAxes, type AxisKey } from "@/lib/camera";
+import { VIEWPORT_BG_HEX } from "@/lib/viewport-theme";
 import { cn } from "@/lib/utils";
 import type { ViewController } from "./view-controller";
 
@@ -17,9 +18,10 @@ function capture(e: React.PointerEvent<Element>) {
 // Blender's gizmo colours.
 const AXIS_COLOR: Record<"x" | "y" | "z", string> = { x: "#ff3352", y: "#8bdc00", z: "#2890ff" };
 /** Opaque blend of an axis colour into the viewport background, for the negative-axis balls. */
-function darken(hex: string, amount = 0.3) {
-  const bg = [0x17, 0x19, 0x1d];
-  const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+function mixToward(hex: string, background: string, amount = 0.3) {
+  const parse = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const c = parse(hex);
+  const bg = parse(background);
   return `rgb(${c.map((v, i) => Math.round(v * amount + bg[i] * (1 - amount))).join(",")})`;
 }
 
@@ -48,11 +50,21 @@ function balls(view: ReturnType<ViewController["getSnapshot"]>["view"]): Ball[] 
  * Blender-style navigation gizmo: click an axis to animate to that view (click it again for the
  * opposite side), drag to orbit. Below it: drag-to-zoom, drag-to-pan, and perspective toggle.
  */
-export function NavGizmo({ controller, style }: { controller: ViewController; style: React.CSSProperties }) {
+export function NavGizmo({
+  controller,
+  dark,
+  style,
+}: {
+  controller: ViewController;
+  dark: boolean;
+  style: React.CSSProperties;
+}) {
   const snap = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const [hover, setHover] = useState<AxisKey | "gizmo" | null>(null);
   const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null);
   const list = balls(snap.view);
+  const ground = dark ? VIEWPORT_BG_HEX.dark : VIEWPORT_BG_HEX.light;
+  const ink = dark ? "white" : "#18181b";
 
   const hit = (e: React.PointerEvent<SVGSVGElement>): Ball | null => {
     const r = e.currentTarget.getBoundingClientRect();
@@ -104,7 +116,7 @@ export function NavGizmo({ controller, style }: { controller: ViewController; st
           if (!drag.current) setHover(null);
         }}
       >
-        <circle cx={C} cy={C} r={C - 2} fill="white" opacity={hover ? 0.1 : 0} style={{ transition: "opacity 120ms" }} />
+        <circle cx={C} cy={C} r={C - 2} fill={ink} opacity={hover ? 0.08 : 0} style={{ transition: "opacity 120ms" }} />
         {list.map((b) =>
           b.positive ? (
             <line key={`l${b.key}`} x1={C} y1={C} x2={b.x} y2={b.y} stroke={b.color} strokeWidth={2} strokeLinecap="round" />
@@ -118,8 +130,8 @@ export function NavGizmo({ controller, style }: { controller: ViewController; st
                 cx={b.x}
                 cy={b.y}
                 r={BALL}
-                fill={b.positive ? b.color : darken(b.color)}
-                stroke={hovered ? "white" : b.positive ? "none" : b.color}
+                fill={b.positive ? b.color : mixToward(b.color, ground)}
+                stroke={hovered ? ink : b.positive ? "none" : b.color}
                 strokeWidth={hovered ? 2 : 1.5}
               />
               {/* Negative axes are labelled when hovered or pointing at the viewer, as in Blender. */}
@@ -131,7 +143,7 @@ export function NavGizmo({ controller, style }: { controller: ViewController; st
                   textAnchor="middle"
                   fontSize={b.positive ? 11 : 9}
                   fontWeight={700}
-                  fill={b.positive ? "#0b0b0e" : "white"}
+                  fill={b.positive || !dark ? "#0b0b0e" : "white"}
                   style={{ pointerEvents: "none" }}
                 >
                   {b.positive ? b.key[1].toUpperCase() : `-${b.key[1].toUpperCase()}`}
@@ -142,7 +154,7 @@ export function NavGizmo({ controller, style }: { controller: ViewController; st
         })}
       </svg>
 
-      <div className="pointer-events-auto flex flex-col gap-1 rounded-full bg-black/35 p-1 backdrop-blur-sm">
+      <div className="pointer-events-auto flex flex-col gap-1 rounded-full bg-white/80 p-1 shadow-surface-4 backdrop-blur-sm dark:bg-black/35 dark:shadow-none">
         <DragTool
           label="Zoom: drag up or down"
           onDrag={(_, dy) => controller.zoomBy(Math.exp(-dy * 0.01))}
@@ -156,8 +168,8 @@ export function NavGizmo({ controller, style }: { controller: ViewController; st
             aria-pressed={snap.ortho}
             onClick={() => controller.toggleOrtho()}
             className={cn(
-              "flex size-9 items-center justify-center rounded-full text-white/80 outline-none transition-colors hover:bg-white/15 hover:text-white focus-visible:ring-2 focus-visible:ring-white/60",
-              snap.ortho && "bg-white/20 text-white"
+              "flex size-9 items-center justify-center rounded-full text-foreground/75 outline-none transition-colors hover:bg-black/[0.06] hover:text-foreground focus-visible:ring-2 focus-visible:ring-foreground/25 dark:text-white/80 dark:hover:bg-white/15 dark:hover:text-white dark:focus-visible:ring-white/60",
+              snap.ortho && "bg-black/10 text-foreground dark:bg-white/20 dark:text-white"
             )}
           >
             <Grid3x3 className="size-[18px]" />
@@ -178,8 +190,8 @@ function DragTool({ label, icon, onDrag }: { label: string; icon: React.ReactNod
         type="button"
         aria-label={label}
         className={cn(
-          "flex size-9 cursor-grab touch-none items-center justify-center rounded-full text-white/80 outline-none transition-colors hover:bg-white/15 hover:text-white focus-visible:ring-2 focus-visible:ring-white/60",
-          active && "cursor-grabbing bg-white/20 text-white"
+          "flex size-9 cursor-grab touch-none items-center justify-center rounded-full text-foreground/75 outline-none transition-colors hover:bg-black/[0.06] hover:text-foreground focus-visible:ring-2 focus-visible:ring-foreground/25 dark:text-white/80 dark:hover:bg-white/15 dark:hover:text-white dark:focus-visible:ring-white/60",
+          active && "cursor-grabbing bg-black/10 text-foreground dark:bg-white/20 dark:text-white"
         )}
         onPointerDown={(e) => {
           capture(e);

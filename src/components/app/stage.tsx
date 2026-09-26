@@ -11,7 +11,7 @@ import type { Insets, ViewportApi } from "./viewport-3d";
 // three.js only loads once a file is open, and never during prerender.
 const Viewport3D = dynamic(() => import("./viewport-3d").then((m) => m.Viewport3D), {
   ssr: false,
-  loading: () => <div className="h-full w-full animate-pulse bg-[#17191d]" />,
+  loading: () => <div className="h-full w-full animate-pulse bg-[var(--viewport-bg)]" />,
 });
 
 export type View = "3d" | "2d" | "original";
@@ -48,7 +48,7 @@ export function Stage({
   const gap = { top: insets.top, right: insets.right, bottom: insets.bottom, left: insets.left };
 
   return (
-    <div className="absolute inset-0 bg-background">
+    <div className="absolute inset-0 bg-[var(--viewport-bg)]">
       {!file ? (
         <div className="absolute" style={gap}>
           <Dropzone onFile={onFile} onError={onError} />

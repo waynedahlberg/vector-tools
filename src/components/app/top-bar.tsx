@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { TabsSubtle, TabsSubtleItem } from "@/components/ui/tabs-subtle";
 import { formatBytes } from "@/lib/format";
+import { AppearanceToggle } from "./appearance-toggle";
 import type { LoadedFile } from "./dropzone";
 import type { View } from "./stage";
 
@@ -145,6 +146,8 @@ export function TopBar({
       )}
 
       <div className={`${bar} w-[340px] shrink-0 justify-end gap-0.5 px-1.5`}>
+        <AppearanceToggle />
+        <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
         <Tooltip content="Turn off every geometry change (repair, outlines, cleanup, hidden layers)">
           <Button variant="ghost" size="sm" leadingIcon={RotateCcw} disabled={!geometryModified} onClick={onResetGeometry}>
             Reset geometry

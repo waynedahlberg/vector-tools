@@ -18,12 +18,25 @@ export const metadata: Metadata = {
   description: "Convert SVG artwork into 2D STEP curves and faces for Plasticity and other CAD tools.",
 };
 
-// Follow the OS light/dark setting before first paint to avoid a flash.
+// Apply the saved appearance before first paint. "system" follows the OS.
 const themeScript = `(() => {
+  const KEY = "svg2step:appearance";
   const m = window.matchMedia("(prefers-color-scheme: dark)");
-  const set = () => document.documentElement.classList.toggle("dark", m.matches);
-  set();
-  m.addEventListener("change", set);
+  const mode = () => {
+    try {
+      const v = localStorage.getItem(KEY);
+      if (v === "light" || v === "dark" || v === "system") return v;
+    } catch (e) {}
+    return "system";
+  };
+  const apply = () => {
+    const chosen = mode();
+    const dark = chosen === "dark" || (chosen !== "light" && m.matches);
+    document.documentElement.classList.toggle("dark", dark);
+    document.documentElement.dataset.appearance = chosen;
+  };
+  apply();
+  m.addEventListener("change", apply);
 })();`;
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

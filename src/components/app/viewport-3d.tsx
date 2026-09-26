@@ -10,30 +10,14 @@ import type { Pt } from "@/lib/geometry";
 import { planeMap, type DrawingPlane } from "@/lib/step-writer";
 import type { AxisKey } from "@/lib/camera";
 import { polylineNodes, splineNodes } from "@/lib/nodes";
+import { useIsDark } from "@/lib/appearance";
+import { viewportPalette } from "@/lib/viewport-theme";
 import { ISO_ANGLES, ViewController, type Insets } from "./view-controller";
 import { NavGizmo } from "./nav-gizmo";
 
 export type { Insets } from "./view-controller";
 
-// The viewport keeps a dark CAD-style canvas in both themes, like Plasticity's.
-const COLORS = {
-  background: 0x17191d,
-  gridMinor: 0x262a31,
-  gridMajor: 0x323741,
-  axisX: 0xe5484d,
-  axisY: 0x46a758,
-  axisZ: 0x3e8ef7,
-  closed: 0x3ee6ff,
-  open: 0xffb224,
-  face: 0x3ee6ff,
-  vertex: 0xf5f7fa,
-  handle: 0x8fa3bf,
-  openEnd: 0xffb224,
-  selfIntersection: 0xff4d4f,
-  join: 0x30d158,
-  seam: 0xff6bd6,
-  ghost: 0x6b7280,
-};
+const AXIS = { x: 0xe5484d, y: 0x46a758, z: 0x3e8ef7 };
 
 let dotTexture: THREE.Texture | null = null;
 /** A soft round sprite so marker points render as dots rather than squares. */
@@ -143,6 +127,7 @@ export function Viewport3D({
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<Scene | null>(null);
+  const dark = useIsDark();
   const lastFit = useRef<{ key: string; center: THREE.Vector3; radius: number } | null>(null);
   const planeRef = useRef(options.plane);
   // The camera controller exists for the component's lifetime; the renderer attaches to it.
@@ -194,7 +179,7 @@ export function Viewport3D({
       return;
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setClearColor(COLORS.background);
+    renderer.setClearColor(viewportPalette(document.documentElement.classList.contains("dark")).background);
     host.appendChild(renderer.domElement);
     const canvas = renderer.domElement;
     canvas.style.display = "block";
@@ -290,10 +275,18 @@ export function Viewport3D({
     };
   }, [controller]);
 
+  useEffect(() => {
+    const s = sceneRef.current;
+    if (!s) return;
+    s.renderer.setClearColor(viewportPalette(dark).background);
+    s.invalidate();
+  }, [dark]);
+
   // Rebuild grid and geometry whenever the prepared output changes.
   useEffect(() => {
     const s = sceneRef.current;
     if (!s) return;
+    const palette = viewportPalette(dark);
     disposeGroup(s.grid);
     disposeGroup(s.geometry);
     const b = prepared?.bounds;
@@ -327,13 +320,13 @@ export function Viewport3D({
       lines.renderOrder = 0;
       return lines;
     };
-    s.grid.add(gridLines(minorPts, COLORS.gridMinor), gridLines(majorPts, COLORS.gridMajor));
+    s.grid.add(gridLines(minorPts, palette.gridMinor), gridLines(majorPts, palette.gridMajor));
 
     const axisLen = Math.max(major, extent * 0.2);
     const axes: [number[], number, number][] = [
-      [[-half, 0, 0, half, 0, 0], COLORS.axisX, 1.5],
-      [[0, -half, 0, 0, half, 0], COLORS.axisY, 1.5],
-      [[0, 0, 0, 0, 0, axisLen], COLORS.axisZ, 2],
+      [[-half, 0, 0, half, 0, 0], AXIS.x, 1.5],
+      [[0, -half, 0, 0, half, 0], AXIS.y, 1.5],
+      [[0, 0, 0, 0, 0, axisLen], AXIS.z, 2],
     ];
     for (const [pts, color, w] of axes) {
       const line = fatLines(pts, color, w, s.resolution);
@@ -346,7 +339,7 @@ export function Viewport3D({
     // --- Faces: translucent fill with holes, as they'll import.
     if (options.output !== "curves") {
       const material = new THREE.MeshBasicMaterial({
-        color: COLORS.face,
+        color: palette.face,
         transparent: true,
         opacity: 0.26,
         side: THREE.DoubleSide,
@@ -370,7 +363,7 @@ export function Viewport3D({
       g.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
       const ghost = new THREE.LineSegments(
         g,
-        new THREE.LineBasicMaterial({ color: COLORS.ghost, transparent: true, opacity: 0.9, depthWrite: false })
+        new THREE.LineBasicMaterial({ color: palette.ghost, transparent: true, opacity: 0.9, depthWrite: false })
       );
       ghost.renderOrder = 2;
       s.geometry.add(ghost);
@@ -383,8 +376,8 @@ export function Viewport3D({
       if (!showCurves && !pl.closed) continue;
       segmentsOf(pl.pts, pl.closed ? closedPts : openPts);
     }
-    if (closedPts.length) s.geometry.add(fatLines(closedPts, COLORS.closed, 2, s.resolution));
-    if (openPts.length) s.geometry.add(fatLines(openPts, COLORS.open, 2, s.resolution));
+    if (closedPts.length) s.geometry.add(fatLines(closedPts, palette.closed, 2, s.resolution));
+    if (openPts.length) s.geometry.add(fatLines(openPts, palette.open, 2, s.resolution));
     s.geometry.children.forEach((c) => {
       if (c.renderOrder === 0) c.renderOrder = 3;
     });
@@ -398,19 +391,19 @@ export function Viewport3D({
         g.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
         const lines = new THREE.LineSegments(
           g,
-          new THREE.LineBasicMaterial({ color: COLORS.handle, transparent: true, opacity: 0.75, depthTest: false })
+          new THREE.LineBasicMaterial({ color: palette.handle, transparent: true, opacity: 0.75, depthTest: false })
         );
         lines.renderOrder = 7;
-        s.geometry.add(lines, markers(nodes.handles.map(([, b]) => b), COLORS.handle, 4));
+        s.geometry.add(lines, markers(nodes.handles.map(([, b]) => b), palette.handle, 4));
       }
-      s.geometry.add(markers(nodes.anchors, COLORS.vertex, 5.5));
+      s.geometry.add(markers(nodes.anchors, palette.vertex, 5.5));
     }
 
     // --- Problem markers and the optional seam/direction overlay.
     const { problems, repairs } = prepared;
-    if (problems.openEnds.length) s.geometry.add(markers(problems.openEnds, COLORS.openEnd, 7));
-    if (repairs.joins.length) s.geometry.add(markers(repairs.joins, COLORS.join, 8));
-    if (problems.selfIntersections.length) s.geometry.add(markers(problems.selfIntersections, COLORS.selfIntersection, 9));
+    if (problems.openEnds.length) s.geometry.add(markers(problems.openEnds, palette.openEnd, 7));
+    if (repairs.joins.length) s.geometry.add(markers(repairs.joins, palette.join, 8));
+    if (problems.selfIntersections.length) s.geometry.add(markers(problems.selfIntersections, palette.selfIntersection, 9));
     if (showSeams && prepared.seams.length) {
       const len = extent * 0.025;
       const arrows: number[] = [];
@@ -423,10 +416,10 @@ export function Viewport3D({
           arrows.push(tip.x, tip.y, 0, tip.x + wx * len * 0.4, tip.y + wy * len * 0.4, 0);
         }
       }
-      const arrowLines = fatLines(arrows, COLORS.seam, 2, s.resolution);
+      const arrowLines = fatLines(arrows, palette.seam, 2, s.resolution);
       (arrowLines.material as LineMaterial).depthTest = false;
       arrowLines.renderOrder = 9;
-      s.geometry.add(arrowLines, markers(prepared.seams.map((q) => q.at), COLORS.seam, 6));
+      s.geometry.add(arrowLines, markers(prepared.seams.map((q) => q.at), palette.seam, 6));
     }
 
     // Lay the drawing on its plane. The grid stays on the XY ground plane.
@@ -454,16 +447,16 @@ export function Viewport3D({
       lastFit.current = { key: fileKey, center, radius };
     }
     s.invalidate();
-  }, [prepared, options.output, options.curveMode, options.unit, options.plane, fileKey, showSeams, showNodes, nodes, controller]);
+  }, [prepared, options.output, options.curveMode, options.unit, options.plane, fileKey, showSeams, showNodes, nodes, controller, dark]);
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-[#17191d]">
+    <div className="relative h-full w-full overflow-hidden bg-[var(--viewport-bg)]">
       <div
         ref={hostRef}
-        className="h-full w-full cursor-default data-[no-webgl=true]:flex data-[no-webgl=true]:cursor-default data-[no-webgl=true]:items-center data-[no-webgl=true]:justify-center data-[no-webgl=true]:text-[13px] data-[no-webgl=true]:text-white/60"
+        className="h-full w-full cursor-default data-[no-webgl=true]:flex data-[no-webgl=true]:cursor-default data-[no-webgl=true]:items-center data-[no-webgl=true]:justify-center data-[no-webgl=true]:text-[13px] data-[no-webgl=true]:text-[color:var(--viewport-ink)]"
       />
       <div
-        className="pointer-events-none absolute flex items-end justify-between gap-3 p-3 text-[11px] text-white/55"
+        className="pointer-events-none absolute flex items-end justify-between gap-3 p-3 text-[11px] text-[color:var(--viewport-ink)]"
         style={{ left: insets.left, right: insets.right, bottom: insets.bottom }}
       >
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
@@ -476,7 +469,7 @@ export function Viewport3D({
           <span className="flex items-center gap-1.5">
             <span className="h-0.5 w-3 rounded-full bg-[#3e8ef7]" />Z
           </span>
-          <span className="text-white/75">{snap.name}</span>
+          <span className="text-[color:var(--viewport-ink-strong)]">{snap.name}</span>
           <span>{options.plane.toUpperCase()} plane</span>
           {gridLabel && <span className="tabular-nums">Grid {gridLabel}</span>}
           {!!prepared?.problems.openEnds.length && (
@@ -491,7 +484,7 @@ export function Viewport3D({
           )}
           {showNodes && (
             <span className="flex items-center gap-1.5 tabular-nums">
-              <span className="size-2 rounded-full bg-[#f5f7fa]" />
+              <span className="size-2 rounded-full bg-[var(--viewport-vertex)] ring-1 ring-foreground/15" />
               {nodes.anchors.length > MAX_NODES
                 ? `${nodes.anchors.length.toLocaleString()} nodes (too many to draw)`
                 : `${nodes.anchors.length.toLocaleString()} ${nodes.anchors.length === 1 ? "node" : "nodes"}`}
@@ -510,7 +503,7 @@ export function Viewport3D({
         </div>
         <span className="hidden shrink-0 text-right 2xl:block">Drag to orbit · Right-drag to pan · Scroll to zoom</span>
       </div>
-      <NavGizmo controller={controller} style={{ top: insets.top + 4, right: insets.right + 12 }} />
+      <NavGizmo controller={controller} dark={dark} style={{ top: insets.top + 4, right: insets.right + 12 }} />
     </div>
   );
 }

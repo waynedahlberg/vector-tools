@@ -176,6 +176,14 @@
   --shadow-6: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color), 0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color), 0 12px 12px -6px var(--shadow-color), 0 24px 24px -12px var(--shadow-color);
   --shadow-7: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color), 0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color), 0 12px 12px -6px var(--shadow-color), 0 24px 24px -12px var(--shadow-color), 0 48px 48px -24px var(--shadow-color);
   --shadow-8: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color), 0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color), 0 12px 12px -6px var(--shadow-color), 0 24px 24px -12px var(--shadow-color), 0 48px 48px -24px var(--shadow-color), 0 96px 96px -48px var(--shadow-color);
+  /* Ground is a paper step under surface-1. Panels use the top of the ladder (white) at a higher alpha so they stay light. */
+  --viewport-bg: #f5f6f8;
+  --viewport-ink: rgb(24 24 27 / 0.62);
+  --viewport-ink-strong: rgb(24 24 27 / 0.88);
+  --viewport-vertex: #18181b;
+  --panel-fill: var(--surface-8);
+  --panel-alpha: 0.88;
+  --panel-blur: 10px;
 }
 
 .dark {
@@ -239,6 +247,13 @@
   --shadow-6: inset 0 1px 0 0 var(--dm-hi-high), inset 0 0 0 1px var(--dm-ring-high), 0 0 0 1px rgba(0,0,0,0.18), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop), 0 6px 6px -3px var(--dm-drop), 0 12px 12px -6px var(--dm-drop), 0 24px 24px -12px var(--dm-drop);
   --shadow-7: inset 0 1px 0 0 var(--dm-hi-peak), inset 0 0 0 1px var(--dm-ring-high), 0 0 0 1px rgba(0,0,0,0.20), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop), 0 6px 6px -3px var(--dm-drop), 0 12px 12px -6px var(--dm-drop), 0 24px 24px -12px var(--dm-drop), 0 48px 48px -24px var(--dm-drop);
   --shadow-8: inset 0 1px 0 0 var(--dm-hi-peak), inset 0 0 0 1px var(--dm-ring-high), 0 0 0 1px rgba(0,0,0,0.22), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop), 0 6px 6px -3px var(--dm-drop), 0 12px 12px -6px var(--dm-drop), 0 24px 24px -12px var(--dm-drop), 0 48px 48px -24px var(--dm-drop), 0 96px 96px -48px var(--dm-drop);
+  --viewport-bg: #17191d;
+  --viewport-ink: rgb(255 255 255 / 0.55);
+  --viewport-ink-strong: rgb(255 255 255 / 0.75);
+  --viewport-vertex: #f5f7fa;
+  --panel-fill: var(--surface-2);
+  --panel-alpha: 0.5;
+  --panel-blur: 10px;
 }
 
 @layer base {
@@ -378,13 +393,9 @@
     syntax: "<number>";
     inherits: false;
     initial-value: 1;}
-/* Floating panels over the viewport: translucent, with the viewport blurred behind them. */
-:root {
-  --panel-alpha: 0.5;
-  --panel-blur: 10px;
-}
+/* Floating panels. Alpha is set with relative color syntax so "transparent" cannot mix in black and gray the fill. */
 .panel-glass {
-  background-color: color-mix(in srgb, var(--surface-2) calc(var(--panel-alpha) * 100%), transparent);
+  background-color: rgb(from var(--panel-fill) r g b / var(--panel-alpha));
   -webkit-backdrop-filter: blur(var(--panel-blur));
   backdrop-filter: blur(var(--panel-blur));
 }
