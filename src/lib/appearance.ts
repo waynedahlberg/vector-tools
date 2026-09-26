@@ -130,7 +130,9 @@ function bindScheme() {
 export function subscribeAppearance(listener: () => void) {
   listeners.add(listener);
   bindScheme();
-  return () => listeners.delete(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 }
 
 /** Resolved theme. Safe in client-only trees; the server snapshot is "not dark". */
