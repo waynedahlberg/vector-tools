@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
-import { Maximize, Box, Square } from "lucide-react";
+import { Maximize, Box, Square, Waypoints } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import type { ConvertOptions, Prepared } from "@/lib/convert";
@@ -24,7 +24,43 @@ const COLORS = {
   open: 0xffb224,
   face: 0x3ee6ff,
   vertex: 0xf5f7fa,
+  openEnd: 0xffb224,
+  selfIntersection: 0xff4d4f,
+  join: 0x30d158,
+  seam: 0xff6bd6,
 };
+
+let dotTexture: THREE.Texture | null = null;
+/** A soft round sprite so marker points render as dots rather than squares. */
+function dot() {
+  if (dotTexture) return dotTexture;
+  const c = document.createElement("canvas");
+  c.width = c.height = 64;
+  const g = c.getContext("2d")!;
+  g.fillStyle = "#fff";
+  g.beginPath();
+  g.arc(32, 32, 28, 0, Math.PI * 2);
+  g.fill();
+  dotTexture = new THREE.CanvasTexture(c);
+  return dotTexture;
+}
+
+function markers(points: Pt[], color: number, size: number) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(points.flatMap((p) => [p.x, p.y, 0]), 3));
+  const m = new THREE.PointsMaterial({
+    color,
+    size,
+    sizeAttenuation: false,
+    map: dot(),
+    transparent: true,
+    alphaTest: 0.5,
+    depthTest: false,
+  });
+  const pts = new THREE.Points(g, m);
+  pts.renderOrder = 10;
+  return pts;
+}
 
 const ISO_DIR = new THREE.Vector3(0.55, -1, 0.95).normalize();
 const TOP_DIR = new THREE.Vector3(0, -1e-4, 1).normalize();
@@ -90,6 +126,7 @@ export function Viewport3D({
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<Scene | null>(null);
   const lastFit = useRef<{ key: string; center: THREE.Vector3; radius: number } | null>(null);
+  const [showSeams, setShowSeams] = useState(false);
   const gridLabel = prepared?.bounds ? `${+gridStepFor(prepared.bounds).toPrecision(3)} ${options.unit}` : "";
 
   // One-time renderer, camera and controls setup.
@@ -300,6 +337,29 @@ export function Viewport3D({
       if (c.renderOrder === 0) c.renderOrder = 3;
     });
 
+    // --- Problem markers and the optional seam/direction overlay.
+    const { problems, repairs } = prepared;
+    if (problems.openEnds.length) s.geometry.add(markers(problems.openEnds, COLORS.openEnd, 7));
+    if (repairs.joins.length) s.geometry.add(markers(repairs.joins, COLORS.join, 8));
+    if (problems.selfIntersections.length) s.geometry.add(markers(problems.selfIntersections, COLORS.selfIntersection, 9));
+    if (showSeams && prepared.seams.length) {
+      const len = extent * 0.025;
+      const arrows: number[] = [];
+      for (const { at, dir } of prepared.seams) {
+        const tip = { x: at.x + dir.x * len, y: at.y + dir.y * len };
+        arrows.push(at.x, at.y, 0, tip.x, tip.y, 0);
+        for (const side of [1, -1]) {
+          const a = Math.PI * 0.82 * side;
+          const wx = dir.x * Math.cos(a) - dir.y * Math.sin(a), wy = dir.x * Math.sin(a) + dir.y * Math.cos(a);
+          arrows.push(tip.x, tip.y, 0, tip.x + wx * len * 0.4, tip.y + wy * len * 0.4, 0);
+        }
+      }
+      const arrowLines = fatLines(arrows, COLORS.seam, 2, s.resolution);
+      (arrowLines.material as LineMaterial).depthTest = false;
+      arrowLines.renderOrder = 9;
+      s.geometry.add(arrowLines, markers(prepared.seams.map((q) => q.at), COLORS.seam, 6));
+    }
+
     // Refit on a new file or when the drawing moves or rescales noticeably, but keep the
     // user's view while they only tweak settings like curve mode.
     s.frame = { center, radius };
@@ -314,7 +374,7 @@ export function Viewport3D({
       lastFit.current = { key: fileKey, center, radius };
     }
     s.invalidate();
-  }, [prepared, options.output, options.curveMode, options.unit, fileKey]);
+  }, [prepared, options.output, options.curveMode, options.unit, fileKey, showSeams]);
 
   const view = (dir?: THREE.Vector3) => sceneRef.current?.fit(dir);
 
@@ -326,6 +386,18 @@ export function Viewport3D({
           <span className="text-[12px] text-muted-foreground">Output geometry on the XY plane, Z up</span>
         </div>
         <div className="flex shrink-0 items-center gap-0.5">
+          <Tooltip content={showSeams ? "Hide start points & direction" : "Show start points & direction"}>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Show start points and direction"
+              aria-pressed={showSeams}
+              active={showSeams}
+              onClick={() => setShowSeams((v) => !v)}
+            >
+              <Waypoints />
+            </Button>
+          </Tooltip>
           <Tooltip content="Top view">
             <Button variant="ghost" size="icon-sm" aria-label="Top view" onClick={() => view(TOP_DIR)}>
               <Square />
@@ -360,6 +432,21 @@ export function Viewport3D({
               <span className="h-0.5 w-3 rounded-full bg-[#3e8ef7]" />Z
             </span>
             {gridLabel && <span className="tabular-nums">Grid {gridLabel}</span>}
+            {!!prepared?.problems.openEnds.length && (
+              <span className="flex items-center gap-1.5">
+                <span className="size-2 rounded-full bg-[#ffb224]" />Open end
+              </span>
+            )}
+            {!!prepared?.problems.selfIntersections.length && (
+              <span className="flex items-center gap-1.5">
+                <span className="size-2 rounded-full bg-[#ff4d4f]" />Crossing
+              </span>
+            )}
+            {!!prepared?.repairs.joins.length && (
+              <span className="flex items-center gap-1.5">
+                <span className="size-2 rounded-full bg-[#30d158]" />Joined
+              </span>
+            )}
           </div>
           <span className="hidden text-right sm:block">Drag to orbit · Right-drag to pan · Scroll to zoom</span>
         </div>

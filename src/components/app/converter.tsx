@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowRight, Check, Download, FileCode2, Redo2, RefreshCw, TriangleAlert, Undo2, X } from "lucide-react";
+import { ArrowRight, Check, Download, FileCode2, Redo2, RefreshCw, RotateCcw, Undo2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -11,8 +11,9 @@ import { Preview } from "./preview";
 import { OptionsPanel } from "./options-panel";
 import { HistoryPanel } from "./history-panel";
 import { useOptionsHistory } from "./use-options-history";
+import { ProblemsList } from "./problems-list";
 import dynamic from "next/dynamic";
-import { DEFAULT_OPTIONS, prepare, toStep, type ConvertOptions, type Prepared } from "@/lib/convert";
+import { DEFAULT_OPTIONS, GEOMETRY_MODIFIERS, prepare, toStep, type ConvertOptions, type Prepared } from "@/lib/convert";
 import { addHistory, clearHistory, deleteHistory, listHistory, type HistoryEntry } from "@/lib/history";
 import { downloadText, formatBytes, formatSize } from "@/lib/format";
 
@@ -97,6 +98,9 @@ export function Converter() {
     scaleText.trim() === "" || !Number.isFinite(scaleValue) || scaleValue <= 0 ? "Enter a number above 0" : undefined;
 
   const updateOptions = (patch: Partial<ConvertOptions>) => setOptions({ ...options, ...patch });
+  const geometryModified = (Object.keys(GEOMETRY_MODIFIERS) as (keyof typeof GEOMETRY_MODIFIERS)[]).some(
+    (k) => JSON.stringify(options[k]) !== JSON.stringify(GEOMETRY_MODIFIERS[k])
+  );
 
   const onScaleText = (v: string) => {
     const n = Number(v);
@@ -268,21 +272,12 @@ export function Converter() {
                 </div>
               )}
 
-              {(prepareError || loadError || (prepared && prepared.warnings.length > 0)) && (
-                <ul className="flex flex-col gap-1.5">
-                  {[prepareError, loadError, ...(prepared?.warnings ?? [])].filter(Boolean).map((w) => (
-                    <motion.li
-                      key={w}
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="flex items-start gap-2 text-[13px] text-muted-foreground"
-                    >
-                      <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-[#f59e0b]" />
-                      <span>{w}</span>
-                    </motion.li>
-                  ))}
-                </ul>
-              )}
+              <ProblemsList
+                prepared={prepared}
+                options={options}
+                errors={[prepareError, loadError].filter((e): e is string => !!e)}
+                onFix={updateOptions}
+              />
             </div>
           )}
           {file && prepared && (
@@ -295,6 +290,17 @@ export function Converter() {
             <div className="-mb-2 -mt-1 flex items-center justify-between gap-2">
               <h2 className="text-[14px] font-medium text-foreground">Settings</h2>
               <div className="flex items-center gap-0.5">
+                <Tooltip content="Turn off every geometry change (repair, outlines, cleanup, hidden layers)">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    leadingIcon={RotateCcw}
+                    disabled={!geometryModified}
+                    onClick={() => updateOptions(GEOMETRY_MODIFIERS)}
+                  >
+                    Reset geometry
+                  </Button>
+                </Tooltip>
                 <Tooltip content="Undo (Ctrl+Z)">
                   <Button variant="ghost" size="icon-sm" aria-label="Undo" disabled={!canUndo} onClick={undoOptions}>
                     <Undo2 />

@@ -14,6 +14,8 @@ import {
 } from "./geometry";
 import { parseSvg, type ParsedSvg, type SvgLayer } from "./svg-parser";
 import { memoStage } from "./pipeline";
+import { countDuplicates, repair, type RepairParams, type RepairReport } from "./repair";
+import { analyse, seams, type Problems, type Seam } from "./analysis";
 import { writeStep, type CurveMode, type OutputUnit, type Region } from "./step-writer";
 
 export type OutputGeometry = "curves" | "faces" | "both";
@@ -31,6 +33,12 @@ export type ConvertOptions = {
   scale: number;
   origin: OriginMode;
   includeHidden: boolean;
+  // Repair (output units). All geometry modifiers default to off, so the default output is
+  // exactly the uploaded geometry.
+  closeGaps: boolean;
+  gapTolerance: number;
+  removeDuplicates: boolean;
+  minFeatureSize: number;
 };
 
 export const DEFAULT_OPTIONS: ConvertOptions = {
@@ -44,7 +52,18 @@ export const DEFAULT_OPTIONS: ConvertOptions = {
   scale: 1,
   origin: "bottom-left",
   includeHidden: false,
+  closeGaps: false,
+  gapTolerance: 0.05,
+  removeDuplicates: false,
+  minFeatureSize: 0,
 };
+
+/** Settings that change the geometry itself; "Reset geometry" turns all of them off. */
+export const GEOMETRY_MODIFIERS = {
+  closeGaps: false,
+  removeDuplicates: false,
+  minFeatureSize: 0,
+} satisfies Partial<ConvertOptions>;
 
 export type Prepared = {
   shapes: Shape[]; // final CAD coordinates (Y up), output units
@@ -63,9 +82,17 @@ export type Prepared = {
   regionPolys: { outer: Pt[]; holes: Pt[][] }[];
   /** Top-level groups found in the SVG. */
   layers: SvgLayer[];
+  problems: Problems;
+  repairs: RepairReport;
+  /** Start point and direction of every closed curve, for the seam overlay. */
+  seams: Seam[];
 };
 
 const MM_PER_UNIT: Record<OutputUnit, number> = { mm: 1, in: 25.4 };
+
+const repairStage = memoStage((shapes: Shape[], p: RepairParams & { extent: number }) =>
+  repair(shapes, p, p.extent)
+);
 
 const parseStage = memoStage((markup: string, p: { includeHidden: boolean; exactEllipses: boolean }): ParsedSvg => {
   const doc = new DOMParser().parseFromString(markup, "image/svg+xml");
@@ -156,8 +183,19 @@ export function prepare(markup: string, opts: ConvertOptions): Prepared {
   const { mm, note } = userUnitToMm(parsed, opts);
   const vb = parsed.info.viewBox;
   const k = (mm * opts.scale) / MM_PER_UNIT[opts.unit];
-  let shapes = placeStage(parsed, { k, vbx: vb?.[0] ?? 0, vby: vb?.[1] ?? 0 });
-  let m: Mat;
+  const placed = placeStage(parsed, { k, vbx: vb?.[0] ?? 0, vby: vb?.[1] ?? 0 });
+  const rough = boundsOf(placed.map((s) => flatten(s, Infinity)));
+  const extent = rough ? Math.max(rough.maxX - rough.minX, rough.maxY - rough.minY, 1e-9) : 1;
+
+  const repaired = repairStage(placed, {
+    closeGaps: opts.closeGaps,
+    gapTolerance: opts.gapTolerance,
+    removeDuplicates: opts.removeDuplicates,
+    minFeatureSize: opts.minFeatureSize,
+    extent,
+  });
+  let shapes = repaired.shapes;
+  let m: Mat = [1, 0, 0, 1, 0, 0];
 
   const previewTol = 0.0004;
   const measure = (list: Shape[]) => {
@@ -203,6 +241,15 @@ export function prepare(markup: string, opts: ConvertOptions): Prepared {
   const regionIdx = opts.output === "curves" ? [] : buildRegions(closedIdx, depth, parent);
   const regions: Region[] = regionIdx.map((r) => ({ outer: shapes[r.outer], holes: r.holes.map((h) => shapes[h]) }));
 
+  const problems = analyse(shapes, polys, {
+    gapHint: Math.max(extent * 0.005, opts.gapTolerance),
+    checkGaps: !opts.closeGaps,
+  });
+  // Counted before seam fixes, which can split identical shapes at different points.
+  problems.duplicateCurves = opts.removeDuplicates ? 0 : countDuplicates(repaired.shapes, extent);
+  const originShift = { x: m[4], y: m[5] };
+  const joins = repaired.report.joins.map((p) => ({ x: p.x + originShift.x, y: p.y + originShift.y }));
+
   const warnings = [...parsed.warnings];
   const openCount = shapes.length - closedIdx.length;
   if (opts.output !== "curves" && openCount > 0) {
@@ -226,6 +273,9 @@ export function prepare(markup: string, opts: ConvertOptions): Prepared {
     polylines: shapes.map((s, i) => ({ pts: shown[i], closed: isClosed(s) })),
     regionPolys: regionIdx.map((r) => ({ outer: shown[r.outer], holes: r.holes.map((h) => shown[h]) })),
     layers: parsed.layers,
+    problems,
+    repairs: { ...repaired.report, joins },
+    seams: seams(shown, shapes.map(isClosed)),
   };
 }
 

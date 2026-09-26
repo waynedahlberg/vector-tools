@@ -16,7 +16,54 @@ const OUTPUT_HELP: Record<OutputGeometry, string> = {
   both: "Curves and faces in one file.",
 };
 
+type Unit = ConvertOptions["unit"];
+
 const TOLERANCE_STEPS = { mm: [0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1], in: [0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005] };
+export const GAP_STEPS = {
+  mm: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1],
+  in: [0.0001, 0.0002, 0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.04],
+};
+const SPECK_STEPS = {
+  mm: [0, 0.05, 0.1, 0.25, 0.5, 1, 2, 5],
+  in: [0, 0.002, 0.005, 0.01, 0.02, 0.04, 0.08, 0.2],
+};
+
+function nearestIndex(steps: number[], value: number) {
+  return steps.reduce((best, s, i) => (Math.abs(s - value) < Math.abs(steps[best] - value) ? i : best), 0);
+}
+
+/** Converts a length setting to the other unit, snapped to that unit's steps. */
+function convertStep(value: number, steps: Record<Unit, number[]>, to: Unit): number {
+  const converted = to === "in" ? value / 25.4 : value * 25.4;
+  return steps[to][nearestIndex(steps[to], converted)];
+}
+
+/** A slider over a fixed list of values, spaced evenly regardless of their magnitude. */
+function StepSlider({
+  label,
+  steps,
+  value,
+  onChange,
+  format,
+}: {
+  label: string;
+  steps: number[];
+  value: number;
+  onChange: (v: number) => void;
+  format: (v: number) => string;
+}) {
+  return (
+    <Slider
+      label={label}
+      value={nearestIndex(steps, value)}
+      onChange={(i) => onChange(steps[i as number])}
+      min={0}
+      max={steps.length - 1}
+      step={1}
+      formatValue={(i) => format(steps[i])}
+    />
+  );
+}
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -69,12 +116,7 @@ export function OptionsPanel({
   sizeNote: string | null;
 }) {
   const unit = options.unit;
-  const steps = TOLERANCE_STEPS[unit];
-  // The slider moves through evenly spaced steps rather than raw values, since they span two decades.
-  const toleranceIndex = steps.reduce(
-    (best, s, i) => (Math.abs(s - options.tolerance) < Math.abs(steps[best] - options.tolerance) ? i : best),
-    0
-  );
+  const withUnit = (v: number) => `${v} ${unit}`;
 
   return (
     <div className="flex flex-col gap-6">
@@ -102,14 +144,12 @@ export function OptionsPanel({
             : "Curves are flattened into straight segments within the tolerance."}
         </p>
         <Reveal show={options.curveMode === "polyline"}>
-          <Slider
+          <StepSlider
             label="Tolerance"
-            value={toleranceIndex}
-            onChange={(v) => onChange({ tolerance: steps[v as number] })}
-            min={0}
-            max={steps.length - 1}
-            step={1}
-            formatValue={(i) => `${steps[i]} ${unit}`}
+            steps={TOLERANCE_STEPS[unit]}
+            value={options.tolerance}
+            onChange={(tolerance) => onChange({ tolerance })}
+            format={withUnit}
           />
         </Reveal>
         <Reveal show={options.curveMode === "spline"}>
@@ -121,13 +161,50 @@ export function OptionsPanel({
         </Reveal>
       </Section>
 
+      <Section title="Repair">
+        <Switch
+          label="Close gaps"
+          checked={options.closeGaps}
+          onToggle={() => onChange({ closeGaps: !options.closeGaps })}
+        />
+        <Reveal show={options.closeGaps}>
+          <StepSlider
+            label="Gap tolerance"
+            steps={GAP_STEPS[unit]}
+            value={options.gapTolerance}
+            onChange={(gapTolerance) => onChange({ gapTolerance })}
+            format={withUnit}
+          />
+          <p className="pt-2 text-[12px] leading-relaxed text-muted-foreground">
+            Joins open path ends closer than this, and closes paths that nearly meet themselves.
+          </p>
+        </Reveal>
+        <Switch
+          label="Remove duplicate curves"
+          checked={options.removeDuplicates}
+          onToggle={() => onChange({ removeDuplicates: !options.removeDuplicates })}
+        />
+        <StepSlider
+          label="Remove specks under"
+          steps={SPECK_STEPS[unit]}
+          value={options.minFeatureSize}
+          onChange={(minFeatureSize) => onChange({ minFeatureSize })}
+          format={(v) => (v === 0 ? "Off" : withUnit(v))}
+        />
+      </Section>
+
       <Section title="Units & scale">
         <TabsSubtle
           selectedIndex={unit === "mm" ? 0 : 1}
           onSelect={(i) => {
-            const next = i === 0 ? "mm" : "in";
-            const s = TOLERANCE_STEPS[next];
-            onChange({ unit: next, tolerance: s[Math.floor(s.length / 2)] });
+            const next: Unit = i === 0 ? "mm" : "in";
+            if (next === unit) return;
+            onChange({
+              unit: next,
+              tolerance: convertStep(options.tolerance, TOLERANCE_STEPS, next),
+              gapTolerance: convertStep(options.gapTolerance, GAP_STEPS, next),
+              minFeatureSize: convertStep(options.minFeatureSize, SPECK_STEPS, next),
+            });
           }}
           idPrefix="units"
         >
