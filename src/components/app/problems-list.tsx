@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import { CircleCheck, CircleAlert, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { ConvertOptions, Prepared } from "@/lib/convert";
-import { GAP_STEPS } from "./options-panel";
+import { GAP_STEPS } from "./panel-kit";
 
 type Item = {
   key: string;

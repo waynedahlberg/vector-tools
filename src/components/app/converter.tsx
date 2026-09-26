@@ -1,21 +1,28 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import { ArrowRight, Check, Download, FileCode2, Redo2, RotateCcw, Undo2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Tooltip } from "@/components/ui/tooltip";
-import { readSvgFile, type LoadedFile } from "./dropzone";
-import { Stage } from "./stage";
-import { OptionsPanel } from "./options-panel";
-import { HistoryPanel } from "./history-panel";
+import { Monitor } from "lucide-react";
+import { SvgFileInput, readSvgFile, type LoadedFile } from "./dropzone";
+import { Stage, type View } from "./stage";
+import { TopBar } from "./top-bar";
+import { SourcePanel } from "./source-panel";
+import { OutputPanel } from "./output-panel";
+import { HISTORY_COLLAPSED, HISTORY_EXPANDED, HistoryDock } from "./history-panel";
 import { useOptionsHistory } from "./use-options-history";
+import type { Insets, ViewportApi } from "./viewport-3d";
 import { DEFAULT_OPTIONS, GEOMETRY_MODIFIERS, PER_FILE_OPTIONS, prepare, toStep, type ConvertOptions, type Prepared } from "@/lib/convert";
 import { addHistory, clearHistory, deleteHistory, listHistory, type HistoryEntry } from "@/lib/history";
-import { downloadText, formatBytes, formatSize } from "@/lib/format";
+import { downloadText, formatSize } from "@/lib/format";
 
 const OPTIONS_KEY = "svg2step:options";
+const VIEW_KEY = "svg2step:view";
+
+// Layout of the floating chrome, in px. Panels sit below the top bar and above the history dock.
+const EDGE = 16;
+const TOP_BAR = 48;
+const GAP = 12;
+const LEFT_W = 320;
+const RIGHT_W = 340;
 
 type Result = { step: string; fileName: string; entry: HistoryEntry };
 
@@ -27,7 +34,34 @@ function safeFileName(name: string) {
   return (name.trim() || "drawing").replace(/[\\/:*?"<>|]+/g, "-").replace(/\.(step|stp)$/i, "");
 }
 
+function initialView(): View {
+  try {
+    const v = localStorage.getItem(VIEW_KEY);
+    if (v === "3d" || v === "2d" || v === "original") return v;
+  } catch {}
+  return "3d";
+}
+
 export function Converter() {
+  return (
+    <>
+      <div className="fixed inset-0 hidden overflow-hidden lg:block">
+        <Workspace />
+      </div>
+      <div className="flex min-h-dvh flex-col items-center justify-center gap-4 px-8 text-center lg:hidden">
+        <div className="flex size-14 items-center justify-center rounded-2xl bg-surface-2 shadow-surface-3">
+          <Monitor className="size-6 text-foreground" strokeWidth={1.75} />
+        </div>
+        <h1 className="text-[17px] font-semibold text-foreground">This application is best on desktop</h1>
+        <p className="max-w-[320px] text-[14px] text-muted-foreground">
+          SVG to STEP needs a larger screen for its 3D preview and settings. Open it on a desktop or laptop browser.
+        </p>
+      </div>
+    </>
+  );
+}
+
+function Workspace() {
   const [file, setFile] = useState<LoadedFile | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
@@ -50,7 +84,12 @@ export function Converter() {
   const [converting, setConverting] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [view, setView] = useState<View>(initialView);
+  const [showSeams, setShowSeams] = useState(false);
+  const viewportRef = useRef<ViewportApi | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Remember the last-used options in this browser as a convenience. They're read after
   // mount, because the page is prerendered and localStorage only exists on the client.
@@ -83,6 +122,12 @@ export function Converter() {
     (k) => JSON.stringify(options[k]) !== JSON.stringify(GEOMETRY_MODIFIERS[k])
   );
 
+  const chooseView = (v: View) => {
+    setView(v);
+    try {
+      localStorage.setItem(VIEW_KEY, v);
+    } catch {}
+  };
 
   const loadFile = (f: LoadedFile) => {
     // Layer and colour choices belong to the previous file.
@@ -91,6 +136,12 @@ export function Converter() {
     setFileName(baseName(f.name));
     setLoadError(null);
     setResult(null);
+  };
+
+  const closeFile = () => {
+    setFile(null);
+    setResult(null);
+    setLoadError(null);
   };
 
   const { prepared, prepareError } = useMemo((): { prepared: Prepared | null; prepareError: string | null } => {
@@ -102,12 +153,10 @@ export function Converter() {
     }
   }, [file, options]);
 
-  const strokeOnlyCount = prepared?.strokeOnly ?? 0;
   const width = prepared?.bounds ? prepared.bounds.maxX - prepared.bounds.minX : 0;
   const height = prepared?.bounds ? prepared.bounds.maxY - prepared.bounds.minY : 0;
   const hasOutput =
-    !!prepared &&
-    (options.output === "faces" ? prepared.regions.length > 0 : prepared.shapes.length > 0);
+    !!prepared && (options.output === "faces" ? prepared.regions.length > 0 : prepared.shapes.length > 0);
   const canConvert = hasOutput && !converting;
 
   const convert = async () => {
@@ -153,7 +202,6 @@ export function Converter() {
     setOptions({ ...DEFAULT_OPTIONS, ...e.options });
     setResult(null);
     setLoadError(null);
-    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   // Files dropped anywhere in the window open, and dragging shows the stage's drop overlay.
@@ -191,159 +239,106 @@ export function Converter() {
         setLoadError((err as Error).message);
       }
     };
+    // Ctrl/Cmd+O opens a file, like a desktop app.
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o") {
+        e.preventDefault();
+        inputRef.current?.click();
+      }
+    };
     window.addEventListener("dragenter", onEnter);
     window.addEventListener("dragleave", onLeave);
     window.addEventListener("dragover", onOver);
     window.addEventListener("drop", onDrop);
+    window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("dragenter", onEnter);
       window.removeEventListener("dragleave", onLeave);
       window.removeEventListener("dragover", onOver);
       window.removeEventListener("drop", onDrop);
+      window.removeEventListener("keydown", onKey);
     };
   }, []);
 
+  const panelTop = EDGE + TOP_BAR + GAP;
+  const panelBottom = EDGE + (historyOpen ? HISTORY_EXPANDED : HISTORY_COLLAPSED) + GAP;
+  const insets: Insets = useMemo(
+    () => ({ top: panelTop, bottom: panelBottom, left: EDGE + LEFT_W + EDGE, right: EDGE + RIGHT_W + EDGE }),
+    [panelTop, panelBottom]
+  );
+  const panelStyle = { top: panelTop, bottom: panelBottom };
+  const errors = [prepareError, loadError].filter((e): e is string => !!e);
+
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-10 px-4 pb-16 pt-8 sm:px-6 sm:pt-12">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-center gap-2.5">
-            <div className="flex size-8 items-center justify-center rounded-lg bg-foreground text-background">
-              <FileCode2 className="size-4" strokeWidth={2} />
-            </div>
-            <h1 className="text-[20px] font-semibold tracking-tight text-foreground">SVG to STEP</h1>
-          </div>
-          <p className="text-[14px] text-muted-foreground">
-            Turn SVG artwork into 2D STEP curves and faces for Plasticity or any CAD tool.
-          </p>
-        </div>
-        <Badge variant="dot" color="green" size="sm" className="self-start sm:self-auto">
-          Runs locally in your browser
-        </Badge>
-      </header>
-
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="flex min-w-0 flex-col gap-4">
-          <Stage
-            file={file}
-            prepared={prepared}
-            options={options}
-            errors={[prepareError, loadError].filter((e): e is string => !!e)}
-            dragging={dragging}
-            onFile={loadFile}
-            onError={setLoadError}
-            onClose={() => {
-              setFile(null);
-              setResult(null);
-              setLoadError(null);
-            }}
-            onFix={updateOptions}
-          />
-        </div>
-
-        <aside className="flex flex-col gap-4 lg:sticky lg:top-6 lg:self-start">
-          <div className="flex flex-col gap-6 rounded-2xl bg-surface-2 p-5 shadow-surface-2">
-            <div className="-mb-2 -mt-1 flex items-center justify-between gap-2">
-              <h2 className="text-[14px] font-medium text-foreground">Settings</h2>
-              <div className="flex items-center gap-0.5">
-                <Tooltip content="Turn off every geometry change (repair, outlines, cleanup, hidden layers)">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    leadingIcon={RotateCcw}
-                    disabled={!geometryModified}
-                    onClick={() => updateOptions(GEOMETRY_MODIFIERS)}
-                  >
-                    Reset geometry
-                  </Button>
-                </Tooltip>
-                <Tooltip content="Undo (Ctrl+Z)">
-                  <Button variant="ghost" size="icon-sm" aria-label="Undo" disabled={!canUndo} onClick={undoOptions}>
-                    <Undo2 />
-                  </Button>
-                </Tooltip>
-                <Tooltip content="Redo (Ctrl+Shift+Z)">
-                  <Button variant="ghost" size="icon-sm" aria-label="Redo" disabled={!canRedo} onClick={redoOptions}>
-                    <Redo2 />
-                  </Button>
-                </Tooltip>
-              </div>
-            </div>
-            <OptionsPanel
-              options={options}
-              onChange={updateOptions}
-              fileName={fileName}
-              onFileName={(v) => {
-                setFileName(v);
-                setResult(null);
-              }}
-              sizeLabel={prepared?.bounds ? formatSize(width, height, options.unit) : null}
-              sizeNote={prepared?.sizeNote ?? null}
-              catalog={prepared}
-              cleanupReport={prepared?.cleanup ?? null}
-              strokeOnlyCount={strokeOnlyCount}
-            />
-
-            <div className="flex flex-col gap-3 border-t border-border pt-5">
-              <AnimatePresence mode="popLayout" initial={false}>
-                {result ? (
-                  <motion.div
-                    key="result"
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ type: "spring", stiffness: 300, damping: 28 }}
-                    className="flex flex-col gap-3"
-                  >
-                    <div className="flex items-center gap-2.5 rounded-lg bg-surface-1 px-3 py-2.5 shadow-surface-1">
-                      <div className="flex size-6 shrink-0 items-center justify-center rounded-full bg-[#22c55e]/15">
-                        <Check className="size-3.5 text-[#16a34a]" strokeWidth={2.5} />
-                      </div>
-                      <div className="flex min-w-0 flex-col">
-                        <span className="truncate text-[13px] font-medium text-foreground">{result.fileName}</span>
-                        <span className="text-[12px] tabular-nums text-muted-foreground">
-                          {formatBytes(result.step.length)} · saved to history
-                        </span>
-                      </div>
-                    </div>
-                    <Button
-                      variant="primary"
-                      leadingIcon={Download}
-                      onClick={() => downloadText(result.step, result.fileName)}
-                      className="w-full"
-                    >
-                      Download STEP
-                    </Button>
-                  </motion.div>
-                ) : (
-                  <motion.div key="convert" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                    <Button
-                      variant="primary"
-                      trailingIcon={ArrowRight}
-                      disabled={!canConvert && !converting}
-                      loading={converting}
-                      onClick={convert}
-                      className="w-full"
-                    >
-                      Convert to STEP
-                    </Button>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-              {!file && <p className="text-center text-[12px] text-muted-foreground">Load an SVG to get started.</p>}
-              {file && prepared && !hasOutput && (
-                <p className="text-center text-[12px] text-muted-foreground">
-                  {options.output === "faces" ? "No closed paths to make faces from." : "No geometry to convert."}
-                </p>
-              )}
-            </div>
-          </div>
-        </aside>
-      </div>
-
-      {historyError && <p className="text-[13px] text-destructive">{historyError}</p>}
-      <HistoryPanel
+    <>
+      <SvgFileInput inputRef={inputRef} onFile={loadFile} onError={setLoadError} />
+      <Stage
+        file={file}
+        prepared={prepared}
+        options={options}
+        view={view}
+        showSeams={showSeams}
+        viewportApi={viewportRef}
+        insets={insets}
+        dragging={dragging}
+        onFile={loadFile}
+        onError={setLoadError}
+      />
+      <TopBar
+        file={file}
+        onOpen={() => inputRef.current?.click()}
+        onClose={closeFile}
+        view={view}
+        onView={chooseView}
+        showSeams={showSeams}
+        onToggleSeams={() => setShowSeams((v) => !v)}
+        onCamera={(mode) => viewportRef.current?.view(mode)}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onUndo={undoOptions}
+        onRedo={redoOptions}
+        geometryModified={geometryModified}
+        onResetGeometry={() => updateOptions(GEOMETRY_MODIFIERS)}
+      />
+      <SourcePanel
+        options={options}
+        onChange={updateOptions}
+        prepared={prepared}
+        errors={errors}
+        hasFile={!!file}
+        style={panelStyle}
+      />
+      <OutputPanel
+        options={options}
+        onChange={updateOptions}
+        sizeLabel={prepared?.bounds ? formatSize(width, height, options.unit) : null}
+        sizeNote={prepared?.sizeNote ?? null}
+        fileName={fileName}
+        onFileName={(v) => {
+          setFileName(v);
+          setResult(null);
+        }}
+        convert={{
+          result,
+          converting,
+          canConvert,
+          hint: !file
+            ? "Open an SVG to get started."
+            : prepared && !hasOutput
+              ? options.output === "faces"
+                ? "No closed paths to make faces from."
+                : "No geometry to convert."
+              : null,
+          onConvert: convert,
+          onDownload: () => result && downloadText(result.step, result.fileName),
+        }}
+        style={panelStyle}
+      />
+      <HistoryDock
         entries={history}
+        error={historyError}
+        open={historyOpen}
+        onToggle={() => setHistoryOpen((v) => !v)}
         onDownload={(e) => downloadText(e.step, e.stepName)}
         onRestore={restore}
         onDelete={async (e) => {
@@ -355,6 +350,6 @@ export function Converter() {
           refreshHistory();
         }}
       />
-    </div>
+    </>
   );
 }

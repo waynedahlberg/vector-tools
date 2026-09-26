@@ -23,6 +23,12 @@ Vitest runs the conversion pipeline in Node (xmldom stands in for the browser's 
 
 The app is a single static page with no server code or environment variables. Import the repo in Vercel with the default Next.js settings, or run `npx vercel`.
 
+## Layout
+
+The 3D preview (or, with no file open, the drop zone) fills the window. Everything else floats over it: the file, view tabs and undo/redo along the top; the **Source** panel on the left (checks, layers and colours, repair, shape); the **Output** panel on the right (output type, precision, size, transform, placement, with the file name and Convert pinned at the bottom); and the conversion history docked along the bottom. The 3D camera centres the drawing in the space between the panels. Open another file with the Open button, Ctrl+O, or by dropping it anywhere.
+
+The app needs a window at least 1024 px wide; smaller screens see a note that it's best on desktop.
+
 ## Options
 
 Every setting that changes the geometry is off by default, so the default output is exactly the uploaded SVG. **Reset geometry** turns them all off again, and **Undo/Redo** (Ctrl+Z / Ctrl+Shift+Z) steps through setting changes. The source SVG is never modified: the output is always the source plus the current settings.

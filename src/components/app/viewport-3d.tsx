@@ -116,11 +116,16 @@ type Scene = {
   resolution: THREE.Vector2;
   invalidate: () => void;
   fit: (dir?: THREE.Vector3) => void;
+  applyInsets: () => void;
   frame: { center: THREE.Vector3; radius: number } | null;
 };
 
 /** Camera commands for toolbars that live outside the canvas. */
 export type ViewportApi = { view: (mode: "face" | "iso" | "fit") => void };
+
+/** Space covered by floating panels on each side, in CSS pixels. */
+export type Insets = { top: number; right: number; bottom: number; left: number };
+const NO_INSETS: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
 
 /** The 3D preview canvas. It fills its parent; toolbars drive it through `apiRef`. */
 export function Viewport3D({
@@ -129,20 +134,28 @@ export function Viewport3D({
   fileKey,
   showSeams,
   apiRef,
+  insets = NO_INSETS,
 }: {
   prepared: Prepared | null;
   options: ConvertOptions;
   fileKey: string;
   showSeams: boolean;
   apiRef?: RefObject<ViewportApi | null>;
+  insets?: Insets;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<Scene | null>(null);
   const lastFit = useRef<{ key: string; center: THREE.Vector3; radius: number } | null>(null);
   const planeRef = useRef(options.plane);
+  const insetsRef = useRef(insets);
   useEffect(() => {
     planeRef.current = options.plane;
   }, [options.plane]);
+
+  useEffect(() => {
+    insetsRef.current = insets;
+    sceneRef.current?.applyInsets();
+  }, [insets]);
 
   useEffect(() => {
     if (!apiRef) return;
@@ -190,6 +203,7 @@ export function Viewport3D({
     scene.add(grid, geometry);
 
     const resolution = new THREE.Vector2(1, 1);
+    let size = { w: 1, h: 1 };
     let needsRender = true;
     const invalidate = () => {
       needsRender = true;
@@ -206,14 +220,25 @@ export function Viewport3D({
       resolution,
       invalidate,
       frame: null,
+      // Panels float over the canvas, so shift the projection centre into the visible gap
+      // between them rather than the middle of the whole canvas.
+      applyInsets: () => {
+        const i = insetsRef.current;
+        camera.setViewOffset(size.w, size.h, (i.right - i.left) / 2, (i.bottom - i.top) / 2, size.w, size.h);
+        invalidate();
+      },
       fit: (dir) => {
         if (!s.frame) return;
         const { center, radius } = s.frame;
         const current = camera.position.clone().sub(controls.target);
         const d = dir ?? (current.lengthSq() > 1e-12 ? current.normalize() : ISO_DIR);
-        // Fit whichever of the vertical or horizontal field of view is tighter.
-        const vHalf = THREE.MathUtils.degToRad(camera.fov / 2);
-        const hHalf = Math.atan(Math.tan(vHalf) * camera.aspect);
+        // Fit the drawing to the visible gap, using whichever field of view is tighter there.
+        const i = insetsRef.current;
+        const visW = Math.max(size.w - i.left - i.right, 80);
+        const visH = Math.max(size.h - i.top - i.bottom, 80);
+        const tanV = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+        const vHalf = Math.atan((tanV * visH) / size.h);
+        const hHalf = Math.atan((tanV * visW) / size.h);
         const dist = (radius / Math.tan(Math.min(vHalf, hHalf))) * 1.15;
         camera.near = dist / 1000;
         camera.far = dist * 100;
@@ -232,8 +257,9 @@ export function Viewport3D({
       renderer.setSize(w, h, false);
       renderer.domElement.style.width = `${w}px`;
       renderer.domElement.style.height = `${h}px`;
+      size = { w, h };
       camera.aspect = w / h;
-      camera.updateProjectionMatrix();
+      s.applyInsets();
       resolution.set(w, h);
       scene.traverse((o) => {
         const mat = (o as THREE.Mesh).material;
@@ -434,8 +460,11 @@ export function Viewport3D({
         ref={hostRef}
         className="h-full w-full cursor-grab active:cursor-grabbing data-[no-webgl=true]:flex data-[no-webgl=true]:cursor-default data-[no-webgl=true]:items-center data-[no-webgl=true]:justify-center data-[no-webgl=true]:text-[13px] data-[no-webgl=true]:text-white/60"
       />
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 p-3 text-[11px] text-white/55">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <div
+        className="pointer-events-none absolute flex items-end justify-between gap-3 p-3 text-[11px] text-white/55"
+        style={{ left: insets.left, right: insets.right, bottom: insets.bottom }}
+      >
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
           <span className="flex items-center gap-1.5">
             <span className="h-0.5 w-3 rounded-full bg-[#e5484d]" />X
           </span>
@@ -468,7 +497,7 @@ export function Viewport3D({
             </span>
           )}
         </div>
-        <span className="hidden shrink-0 text-right lg:block">Drag to orbit · Right-drag to pan · Scroll to zoom</span>
+        <span className="hidden shrink-0 text-right 2xl:block">Drag to orbit · Right-drag to pan · Scroll to zoom</span>
       </div>
     </div>
   );
