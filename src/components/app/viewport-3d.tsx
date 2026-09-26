@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import type { ConvertOptions, Prepared } from "@/lib/convert";
 import type { Pt } from "@/lib/geometry";
+import { planeMap, type DrawingPlane } from "@/lib/step-writer";
 
 // The viewport keeps a dark CAD-style canvas in both themes, like Plasticity's.
 const COLORS = {
@@ -63,7 +64,13 @@ function markers(points: Pt[], color: number, size: number) {
 }
 
 const ISO_DIR = new THREE.Vector3(0.55, -1, 0.95).normalize();
-const TOP_DIR = new THREE.Vector3(0, -1e-4, 1).normalize();
+
+/** Direction from the drawing towards a camera looking straight at it. */
+function faceOnDir(plane: DrawingPlane) {
+  const [x, y, z] = planeMap(plane).normal;
+  // Looking straight down Z would be parallel to the camera's up vector, so tilt it a hair.
+  return new THREE.Vector3(x, plane === "xy" ? -1e-4 : y, z).normalize();
+}
 
 /** 1, 2 or 5 × 10ⁿ, the usual CAD grid steps. */
 function niceStep(raw: number) {
@@ -360,6 +367,17 @@ export function Viewport3D({
       s.geometry.add(arrowLines, markers(prepared.seams.map((q) => q.at), COLORS.seam, 6));
     }
 
+    // Lay the drawing on its plane. The grid stays on the XY ground plane.
+    const map = planeMap(options.plane);
+    s.geometry.setRotationFromMatrix(
+      new THREE.Matrix4().makeBasis(
+        new THREE.Vector3(...map.to3(1, 0)),
+        new THREE.Vector3(...map.to3(0, 1)),
+        new THREE.Vector3(...map.normal)
+      )
+    );
+    center.set(...map.to3(center.x, center.y));
+
     // Refit on a new file or when the drawing moves or rescales noticeably, but keep the
     // user's view while they only tweak settings like curve mode.
     s.frame = { center, radius };
@@ -374,7 +392,7 @@ export function Viewport3D({
       lastFit.current = { key: fileKey, center, radius };
     }
     s.invalidate();
-  }, [prepared, options.output, options.curveMode, options.unit, fileKey, showSeams]);
+  }, [prepared, options.output, options.curveMode, options.unit, options.plane, fileKey, showSeams]);
 
   const view = (dir?: THREE.Vector3) => sceneRef.current?.fit(dir);
 
@@ -383,7 +401,9 @@ export function Viewport3D({
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 flex-col">
           <span className="text-[14px] font-medium text-foreground">3D preview</span>
-          <span className="text-[12px] text-muted-foreground">Output geometry on the XY plane, Z up</span>
+          <span className="text-[12px] text-muted-foreground">
+            Output geometry on the {options.plane.toUpperCase()} plane, Z up
+          </span>
         </div>
         <div className="flex shrink-0 items-center gap-0.5">
           <Tooltip content={showSeams ? "Hide start points & direction" : "Show start points & direction"}>
@@ -398,8 +418,8 @@ export function Viewport3D({
               <Waypoints />
             </Button>
           </Tooltip>
-          <Tooltip content="Top view">
-            <Button variant="ghost" size="icon-sm" aria-label="Top view" onClick={() => view(TOP_DIR)}>
+          <Tooltip content="Face-on view">
+            <Button variant="ghost" size="icon-sm" aria-label="Face-on view" onClick={() => view(faceOnDir(options.plane))}>
               <Square />
             </Button>
           </Tooltip>

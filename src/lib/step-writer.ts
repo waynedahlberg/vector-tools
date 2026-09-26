@@ -6,6 +6,17 @@ import { flatten, signedArea, type EllipseShape, type PathShape, type Pt, type S
 
 export type CurveMode = "spline" | "polyline";
 export type OutputUnit = "mm" | "in";
+/** Which world plane the 2D drawing lies on: XY (top), XZ (front) or YZ (side). */
+export type DrawingPlane = "xy" | "xz" | "yz";
+
+/** Maps drawing coordinates (u, v) onto the chosen world plane. */
+export function planeMap(plane: DrawingPlane) {
+  const to3 = (u: number, v: number): [number, number, number] =>
+    plane === "xy" ? [u, v, 0] : plane === "xz" ? [u, 0, v] : [0, u, v];
+  // The plane normal is u × v, so counter-clockwise in the drawing stays counter-clockwise about it.
+  const normal: [number, number, number] = plane === "xy" ? [0, 0, 1] : plane === "xz" ? [0, -1, 0] : [1, 0, 0];
+  return { to3, normal, uAxis: to3(1, 0) };
+}
 
 export type Region = { outer: Shape; holes: Shape[] };
 
@@ -15,6 +26,7 @@ export type StepInput = {
   unit: OutputUnit;
   curveMode: CurveMode;
   tolerance: number; // polyline flattening tolerance, output units
+  plane: DrawingPlane;
   curves: Shape[] | null; // wireframe curves to emit, or null to skip
   regions: Region[] | null; // planar faces to emit, or null to skip
 };
@@ -58,12 +70,14 @@ class Writer {
 export function writeStep(input: StepInput): string {
   const w = new Writer();
   const list = (ids: string[]) => `(${ids.join(",")})`;
+  const map = planeMap(input.plane);
+  const xyz = (u: number, v: number) => map.to3(u, v).map(real).join(",");
   const pointCache = new Map<string, string>();
   const point = (p: Pt) => {
     const key = `${real(p.x)},${real(p.y)}`;
     let id = pointCache.get(key);
     if (!id) {
-      id = w.add(`CARTESIAN_POINT('',(${key},0.))`);
+      id = w.add(`CARTESIAN_POINT('',(${xyz(p.x, p.y)}))`);
       pointCache.set(key, id);
     }
     return id;
@@ -101,6 +115,11 @@ export function writeStep(input: StepInput): string {
   const dirZ = w.add(`DIRECTION('',(0.,0.,1.))`);
   const dirX = w.add(`DIRECTION('',(1.,0.,0.))`);
   const worldAxis = w.add(`AXIS2_PLACEMENT_3D('',${origin},${dirZ},${dirX})`);
+  // Placement of the drawing plane: its normal and in-plane u direction.
+  const onXY = input.plane === "xy";
+  const normal = onXY ? dirZ : w.add(`DIRECTION('',(${map.normal.map(real).join(",")}))`);
+  const uDir = onXY ? dirX : w.add(`DIRECTION('',(${map.uAxis.map(real).join(",")}))`);
+  const planeAxis = onXY ? worldAxis : w.add(`AXIS2_PLACEMENT_3D('',${origin},${normal},${uDir})`);
 
   // --- Curve geometry -----------------------------------------------------
   const pathCurve = (s: PathShape): string => {
@@ -136,9 +155,9 @@ export function writeStep(input: StepInput): string {
     if (input.curveMode === "polyline") {
       return w.add(`POLYLINE(${str(s.name)},${list(flatten(s, input.tolerance).map(point))})`);
     }
-    const c = w.add(`CARTESIAN_POINT('',(${real(s.center.x)},${real(s.center.y)},0.))`);
-    const ref = w.add(`DIRECTION('',(${real(s.axis.x)},${real(s.axis.y)},0.))`);
-    const place = w.add(`AXIS2_PLACEMENT_3D('',${c},${dirZ},${ref})`);
+    const c = w.add(`CARTESIAN_POINT('',(${xyz(s.center.x, s.center.y)}))`);
+    const ref = w.add(`DIRECTION('',(${xyz(s.axis.x, s.axis.y)}))`);
+    const place = w.add(`AXIS2_PLACEMENT_3D('',${c},${normal},${ref})`);
     if (Math.abs(s.rx - s.ry) <= 1e-9 * Math.max(s.rx, 1)) {
       return w.add(`CIRCLE(${str(s.name)},${place},${real(s.rx)})`);
     }
@@ -162,7 +181,7 @@ export function writeStep(input: StepInput): string {
   }
 
   if (input.regions?.length) {
-    const plane = w.add(`PLANE('',${worldAxis})`);
+    const plane = w.add(`PLANE('',${planeAxis})`);
     const loopFor = (s: Shape): { loop: string; ccw: boolean } => {
       const curve = curveFor(s);
       const vertex = w.add(`VERTEX_POINT('',${point(startPoint(s))})`);

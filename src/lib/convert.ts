@@ -1,5 +1,6 @@
 import {
   flatten,
+  multiply,
   pointInPolygon,
   signedArea,
   reverseShape,
@@ -17,11 +18,13 @@ import { memoStage } from "./pipeline";
 import { displayColor } from "./paint";
 import { countDuplicates, repair, type RepairParams, type RepairReport } from "./repair";
 import { analyse, seams, type Problems, type Seam } from "./analysis";
-import { writeStep, type CurveMode, type OutputUnit, type Region } from "./step-writer";
+import { writeStep, type CurveMode, type DrawingPlane, type OutputUnit, type Region } from "./step-writer";
 
 export type OutputGeometry = "curves" | "faces" | "both";
 export type SizeSource = "document" | "pixels" | "unit-mm";
 export type OriginMode = "svg" | "bottom-left" | "center";
+export type SizeMode = "scale" | "width" | "height";
+export type Rotation = 0 | 90 | 180 | 270;
 
 export type ConvertOptions = {
   output: OutputGeometry;
@@ -40,6 +43,14 @@ export type ConvertOptions = {
   gapTolerance: number;
   removeDuplicates: boolean;
   minFeatureSize: number;
+  // Transform. In width/height mode the drawing is scaled to `targetSize` (output units) and
+  // `scale` is ignored. Rotation is counter-clockwise as seen in CAD.
+  sizeMode: SizeMode;
+  targetSize: number;
+  rotation: Rotation;
+  mirrorX: boolean;
+  mirrorY: boolean;
+  plane: DrawingPlane;
   // Selection (per file): layer keys and display colours to leave out.
   hiddenLayers: string[];
   hiddenColors: string[];
@@ -60,6 +71,12 @@ export const DEFAULT_OPTIONS: ConvertOptions = {
   gapTolerance: 0.05,
   removeDuplicates: false,
   minFeatureSize: 0,
+  sizeMode: "scale",
+  targetSize: 100,
+  rotation: 0,
+  mirrorX: false,
+  mirrorY: false,
+  plane: "xy",
   hiddenLayers: [],
   hiddenColors: [],
 };
@@ -138,10 +155,38 @@ const selectStage = memoStage((parsed: ParsedSvg, p: { hiddenLayers: string[]; h
   );
 });
 
-/** Scale into output units and flip Y so the drawing reads upright in CAD. */
-const placeStage = memoStage((shapes: Shape[], p: { k: number; vbx: number; vby: number }): Shape[] => {
-  const m: Mat = [p.k, 0, 0, -p.k, -p.vbx * p.k, p.vby * p.k];
-  return shapes.map((s) => transformShape(s, m));
+type PlaceParams = {
+  k: number;
+  vbx: number;
+  vby: number;
+  rotation: Rotation;
+  mirrorX: boolean;
+  mirrorY: boolean;
+  sizeMode: SizeMode;
+  targetSize: number;
+};
+
+/**
+ * Scale into output units, flip Y so the drawing reads upright in CAD, then rotate/mirror and
+ * fit to a target size. Everything downstream works in final output units.
+ */
+const placeStage = memoStage((shapes: Shape[], p: PlaceParams): { shapes: Shape[]; fit: number } => {
+  const base: Mat = [p.k, 0, 0, -p.k, -p.vbx * p.k, p.vby * p.k];
+  const r = (p.rotation * Math.PI) / 180;
+  const c = Math.round(Math.cos(r)), s = Math.round(Math.sin(r)); // exact for quarter turns
+  const mirror: Mat = [p.mirrorX ? -1 : 1, 0, 0, p.mirrorY ? -1 : 1, 0, 0];
+  let out = shapes.map((sh) => transformShape(sh, multiply([c, s, -s, c, 0, 0], multiply(mirror, base))));
+
+  let fit = 1;
+  if (p.sizeMode !== "scale" && out.length) {
+    const b = unionBounds(out)!;
+    const current = p.sizeMode === "width" ? b.maxX - b.minX : b.maxY - b.minY;
+    if (current > 1e-12 && p.targetSize > 0) {
+      fit = p.targetSize / current;
+      out = out.map((sh) => transformShape(sh, [fit, 0, 0, fit, 0, 0]));
+    }
+  }
+  return { shapes: out, fit };
 });
 
 function userUnitToMm(parsed: ParsedSvg, opts: ConvertOptions): { mm: number; note: string } {
@@ -219,9 +264,18 @@ export function prepare(markup: string, opts: ConvertOptions): Prepared {
   const parsed = parseStage(markup, { includeHidden: opts.includeHidden, exactEllipses: opts.exactEllipses });
   const { mm, note } = userUnitToMm(parsed, opts);
   const vb = parsed.info.viewBox;
-  const k = (mm * opts.scale) / MM_PER_UNIT[opts.unit];
+  const k = (mm * (opts.sizeMode === "scale" ? opts.scale : 1)) / MM_PER_UNIT[opts.unit];
   const selected = selectStage(parsed, { hiddenLayers: opts.hiddenLayers, hiddenColors: opts.hiddenColors });
-  const placed = placeStage(selected, { k, vbx: vb?.[0] ?? 0, vby: vb?.[1] ?? 0 });
+  const { shapes: placed, fit } = placeStage(selected, {
+    k,
+    vbx: vb?.[0] ?? 0,
+    vby: vb?.[1] ?? 0,
+    rotation: opts.rotation,
+    mirrorX: opts.mirrorX,
+    mirrorY: opts.mirrorY,
+    sizeMode: opts.sizeMode,
+    targetSize: opts.targetSize,
+  });
   const placedBounds = unionBounds(placed);
   const extent = placedBounds
     ? Math.max(placedBounds.maxX - placedBounds.minX, placedBounds.maxY - placedBounds.minY, 1e-9)
@@ -299,8 +353,8 @@ export function prepare(markup: string, opts: ConvertOptions): Prepared {
     openCount,
     closedCount: closedIdx.length,
     warnings,
-    unitsPerUserUnit: k,
-    sizeNote: note,
+    unitsPerUserUnit: k * fit,
+    sizeNote: opts.sizeMode === "scale" ? note : `Scaled to ${+opts.targetSize.toPrecision(6)} ${opts.unit} ${opts.sizeMode}`,
     previewPaths: shapes.map((s, i) => ({ d: toPathD(shown[i], isClosed(s)), closed: isClosed(s) })),
     polylines: shapes.map((s, i) => ({ pts: shown[i], closed: isClosed(s) })),
     regionPolys: regionIdx.map((r) => ({ outer: shown[r.outer], holes: r.holes.map((h) => shown[h]) })),
@@ -318,6 +372,7 @@ export function toStep(prepared: Prepared, opts: ConvertOptions, baseName: strin
     unit: opts.unit,
     curveMode: opts.curveMode,
     tolerance: opts.tolerance,
+    plane: opts.plane,
     curves: opts.output === "faces" ? null : prepared.shapes,
     regions: opts.output === "curves" ? null : prepared.regions,
   });

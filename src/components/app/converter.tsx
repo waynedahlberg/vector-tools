@@ -39,8 +39,6 @@ export function Converter() {
   const [file, setFile] = useState<LoadedFile | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
-  // What the user is typing into the scale field; null shows the current setting.
-  const [scaleDraft, setScaleDraft] = useState<string | null>(null);
   const saveOptions = (next: ConvertOptions) => {
     setResult(null);
     try {
@@ -55,10 +53,7 @@ export function Converter() {
     redo: redoOptions,
     canUndo,
     canRedo,
-  } = useOptionsHistory<ConvertOptions>(DEFAULT_OPTIONS, (next) => {
-    saveOptions(next);
-    setScaleDraft(null);
-  });
+  } = useOptionsHistory<ConvertOptions>(DEFAULT_OPTIONS, saveOptions);
   const [fileName, setFileName] = useState("");
   const [converting, setConverting] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
@@ -92,21 +87,11 @@ export function Converter() {
     refreshHistory();
   }, [refreshHistory]);
 
-  const scaleText = scaleDraft ?? String(options.scale);
-  const scaleValue = Number(scaleText);
-  const scaleError =
-    scaleText.trim() === "" || !Number.isFinite(scaleValue) || scaleValue <= 0 ? "Enter a number above 0" : undefined;
-
   const updateOptions = (patch: Partial<ConvertOptions>) => setOptions({ ...options, ...patch });
   const geometryModified = (Object.keys(GEOMETRY_MODIFIERS) as (keyof typeof GEOMETRY_MODIFIERS)[]).some(
     (k) => JSON.stringify(options[k]) !== JSON.stringify(GEOMETRY_MODIFIERS[k])
   );
 
-  const onScaleText = (v: string) => {
-    const n = Number(v);
-    if (v.trim() !== "" && Number.isFinite(n) && n > 0) updateOptions({ scale: n });
-    setScaleDraft(v);
-  };
 
   const loadFile = (f: LoadedFile) => {
     // Layer and colour choices belong to the previous file.
@@ -131,7 +116,7 @@ export function Converter() {
   const hasOutput =
     !!prepared &&
     (options.output === "faces" ? prepared.regions.length > 0 : prepared.shapes.length > 0);
-  const canConvert = hasOutput && !scaleError && !converting;
+  const canConvert = hasOutput && !converting;
 
   const convert = async () => {
     if (!file || !prepared || !canConvert) return;
@@ -174,7 +159,6 @@ export function Converter() {
     setFile({ name: e.sourceName, svg: e.svg });
     setFileName(e.stepName.replace(/\.step$/i, ""));
     setOptions({ ...DEFAULT_OPTIONS, ...e.options });
-    setScaleDraft(null);
     setResult(null);
     setLoadError(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -318,10 +302,6 @@ export function Converter() {
             <OptionsPanel
               options={options}
               onChange={updateOptions}
-              scaleText={scaleText}
-              onScaleText={onScaleText}
-              scaleError={scaleError}
-              onScaleBlur={() => setScaleDraft(null)}
               fileName={fileName}
               onFileName={(v) => {
                 setFileName(v);

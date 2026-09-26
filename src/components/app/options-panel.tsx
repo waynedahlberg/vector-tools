@@ -1,14 +1,15 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { RadioGroup, RadioItem } from "@/components/ui/radio-group";
 import { TabsSubtle, TabsSubtleItem } from "@/components/ui/tabs-subtle";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { InputGroup, InputField } from "@/components/ui/input-group";
-import type { ConvertOptions, OriginMode, OutputGeometry, Prepared, SizeSource } from "@/lib/convert";
+import type { ConvertOptions, OriginMode, OutputGeometry, Prepared, Rotation, SizeMode, SizeSource } from "@/lib/convert";
+import type { DrawingPlane } from "@/lib/step-writer";
 import { SelectionSection } from "./selection-section";
 
 const OUTPUT_HELP: Record<OutputGeometry, string> = {
@@ -18,6 +19,9 @@ const OUTPUT_HELP: Record<OutputGeometry, string> = {
 };
 
 type Unit = ConvertOptions["unit"];
+
+const SIZE_MODES: SizeMode[] = ["scale", "width", "height"];
+const ROTATIONS: Rotation[] = [0, 90, 180, 270];
 
 const TOLERANCE_STEPS = { mm: [0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1], in: [0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005] };
 export const GAP_STEPS = {
@@ -37,6 +41,34 @@ function nearestIndex(steps: number[], value: number) {
 function convertStep(value: number, steps: Record<Unit, number[]>, to: Unit): number {
   const converted = to === "in" ? value / 25.4 : value * 25.4;
   return steps[to][nearestIndex(steps[to], converted)];
+}
+
+/**
+ * A positive-number field. While typing, the text is kept as a draft and only valid numbers are
+ * committed; on blur it shows the current setting again (which may have changed via undo).
+ */
+function NumberField({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const text = draft ?? String(+value.toPrecision(8));
+  const n = Number(text);
+  const valid = text.trim() !== "" && Number.isFinite(n) && n > 0;
+  return (
+    <InputGroup>
+      <InputField
+        index={0}
+        label={label}
+        inputMode="decimal"
+        value={text}
+        onChange={(v) => {
+          setDraft(v);
+          const next = Number(v);
+          if (v.trim() !== "" && Number.isFinite(next) && next > 0) onChange(next);
+        }}
+        onBlur={() => setDraft(null)}
+        error={valid ? undefined : "Enter a number above 0"}
+      />
+    </InputGroup>
+  );
 }
 
 /** A slider over a fixed list of values, spaced evenly regardless of their magnitude. */
@@ -96,10 +128,6 @@ function Reveal({ show, children }: { show: boolean; children: ReactNode }) {
 export function OptionsPanel({
   options,
   onChange,
-  scaleText,
-  onScaleText,
-  scaleError,
-  onScaleBlur,
   fileName,
   onFileName,
   sizeLabel,
@@ -108,10 +136,6 @@ export function OptionsPanel({
 }: {
   options: ConvertOptions;
   onChange: (patch: Partial<ConvertOptions>) => void;
-  scaleText: string;
-  onScaleText: (v: string) => void;
-  scaleError?: string;
-  onScaleBlur: () => void;
   fileName: string;
   onFileName: (v: string) => void;
   sizeLabel: string | null;
@@ -202,17 +226,19 @@ export function OptionsPanel({
         />
       </Section>
 
-      <Section title="Units & scale">
+      <Section title="Size & units">
         <TabsSubtle
           selectedIndex={unit === "mm" ? 0 : 1}
           onSelect={(i) => {
             const next: Unit = i === 0 ? "mm" : "in";
             if (next === unit) return;
+            const factor = next === "in" ? 1 / 25.4 : 25.4;
             onChange({
               unit: next,
               tolerance: convertStep(options.tolerance, TOLERANCE_STEPS, next),
               gapTolerance: convertStep(options.gapTolerance, GAP_STEPS, next),
               minFeatureSize: convertStep(options.minFeatureSize, SPECK_STEPS, next),
+              targetSize: +(options.targetSize * factor).toPrecision(6),
             });
           }}
           idPrefix="units"
@@ -220,47 +246,78 @@ export function OptionsPanel({
           <TabsSubtleItem index={0} label="Millimetres" />
           <TabsSubtleItem index={1} label="Inches" />
         </TabsSubtle>
-        <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] items-end gap-2">
-          <Select value={options.sizeSource} onValueChange={(v) => onChange({ sizeSource: v as SizeSource })}>
-            <SelectTrigger aria-label="Size from" className="w-full min-w-0" />
-            <SelectContent>
-              <SelectItem index={0} value="document">SVG document size</SelectItem>
-              <SelectItem index={1} value="pixels">Pixels at DPI</SelectItem>
-              <SelectItem index={2} value="unit-mm">1 SVG unit = 1 mm</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select
-            value={String(options.dpi)}
-            onValueChange={(v) => onChange({ dpi: Number(v) })}
-            disabled={options.sizeSource === "unit-mm"}
-          >
-            <SelectTrigger aria-label="DPI" className="w-full min-w-0" />
-            <SelectContent>
-              <SelectItem index={0} value="96">96 DPI</SelectItem>
-              <SelectItem index={1} value="72">72 DPI</SelectItem>
-              <SelectItem index={2} value="90">90 DPI</SelectItem>
-              <SelectItem index={3} value="300">300 DPI</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <InputGroup>
-          <InputField
-            index={0}
-            label="Scale factor"
-            inputMode="decimal"
-            value={scaleText}
-            onChange={onScaleText}
-            onBlur={onScaleBlur}
-            error={scaleError}
-            placeholder="1"
+        <TabsSubtle
+          selectedIndex={SIZE_MODES.indexOf(options.sizeMode)}
+          onSelect={(i) => onChange({ sizeMode: SIZE_MODES[i] })}
+          idPrefix="size-mode"
+        >
+          <TabsSubtleItem index={0} label="Scale" />
+          <TabsSubtleItem index={1} label="Fit width" />
+          <TabsSubtleItem index={2} label="Fit height" />
+        </TabsSubtle>
+        {options.sizeMode === "scale" ? (
+          <>
+            <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] items-end gap-2">
+              <Select value={options.sizeSource} onValueChange={(v) => onChange({ sizeSource: v as SizeSource })}>
+                <SelectTrigger aria-label="Size from" className="w-full min-w-0" />
+                <SelectContent>
+                  <SelectItem index={0} value="document">SVG document size</SelectItem>
+                  <SelectItem index={1} value="pixels">Pixels at DPI</SelectItem>
+                  <SelectItem index={2} value="unit-mm">1 SVG unit = 1 mm</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select
+                value={String(options.dpi)}
+                onValueChange={(v) => onChange({ dpi: Number(v) })}
+                disabled={options.sizeSource === "unit-mm"}
+              >
+                <SelectTrigger aria-label="DPI" className="w-full min-w-0" />
+                <SelectContent>
+                  <SelectItem index={0} value="96">96 DPI</SelectItem>
+                  <SelectItem index={1} value="72">72 DPI</SelectItem>
+                  <SelectItem index={2} value="90">90 DPI</SelectItem>
+                  <SelectItem index={3} value="300">300 DPI</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <NumberField label="Scale factor" value={options.scale} onChange={(scale) => onChange({ scale })} />
+          </>
+        ) : (
+          <NumberField
+            key={options.sizeMode}
+            label={`Target ${options.sizeMode} (${unit})`}
+            value={options.targetSize}
+            onChange={(targetSize) => onChange({ targetSize })}
           />
-        </InputGroup>
+        )}
         {sizeLabel && (
           <div className="flex flex-col gap-0.5 rounded-lg bg-surface-1 px-3 py-2 shadow-surface-1">
             <span className="text-[13px] font-medium tabular-nums text-foreground">{sizeLabel}</span>
             {sizeNote && <span className="text-[12px] text-muted-foreground">{sizeNote}</span>}
           </div>
         )}
+      </Section>
+
+      <Section title="Transform">
+        <TabsSubtle
+          selectedIndex={ROTATIONS.indexOf(options.rotation)}
+          onSelect={(i) => onChange({ rotation: ROTATIONS[i] })}
+          idPrefix="rotation"
+        >
+          {ROTATIONS.map((r, i) => (
+            <TabsSubtleItem key={r} index={i} label={`${r}°`} />
+          ))}
+        </TabsSubtle>
+        <Switch
+          label="Mirror horizontally"
+          checked={options.mirrorX}
+          onToggle={() => onChange({ mirrorX: !options.mirrorX })}
+        />
+        <Switch
+          label="Mirror vertically"
+          checked={options.mirrorY}
+          onToggle={() => onChange({ mirrorY: !options.mirrorY })}
+        />
       </Section>
 
       <Section title="Placement">
@@ -270,6 +327,14 @@ export function OptionsPanel({
             <SelectItem index={0} value="bottom-left">Origin at bottom-left</SelectItem>
             <SelectItem index={1} value="center">Origin at center</SelectItem>
             <SelectItem index={2} value="svg">Keep SVG coordinates</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={options.plane} onValueChange={(v) => onChange({ plane: v as DrawingPlane })}>
+          <SelectTrigger aria-label="Drawing plane" className="w-full min-w-0" />
+          <SelectContent>
+            <SelectItem index={0} value="xy">XY plane (top)</SelectItem>
+            <SelectItem index={1} value="xz">XZ plane (front)</SelectItem>
+            <SelectItem index={2} value="yz">YZ plane (side)</SelectItem>
           </SelectContent>
         </Select>
         <Switch
