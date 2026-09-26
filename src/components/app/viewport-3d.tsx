@@ -29,6 +29,7 @@ const COLORS = {
   selfIntersection: 0xff4d4f,
   join: 0x30d158,
   seam: 0xff6bd6,
+  ghost: 0x6b7280,
 };
 
 let dotTexture: THREE.Texture | null = null;
@@ -319,6 +320,20 @@ export function Viewport3D({
       }
     }
 
+    // --- Ghost: the geometry before outlining/cleanup, thin and dim underneath the output.
+    if (prepared.ghost.length) {
+      const pts: number[] = [];
+      for (const poly of prepared.ghost) segmentsOf(poly, pts);
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
+      const ghost = new THREE.LineSegments(
+        g,
+        new THREE.LineBasicMaterial({ color: COLORS.ghost, transparent: true, opacity: 0.9, depthWrite: false })
+      );
+      ghost.renderOrder = 2;
+      s.geometry.add(ghost);
+    }
+
     // --- Curves: high-visibility lines, sampled exactly as exported.
     const showCurves = options.output !== "faces";
     const closedPts: number[] = [], openPts: number[] = [];
@@ -460,6 +475,11 @@ export function Viewport3D({
             {!!prepared?.problems.selfIntersections.length && (
               <span className="flex items-center gap-1.5">
                 <span className="size-2 rounded-full bg-[#ff4d4f]" />Crossing
+              </span>
+            )}
+            {!!prepared?.ghost.length && (
+              <span className="flex items-center gap-1.5">
+                <span className="h-px w-3 bg-[#6b7280]" />Original
               </span>
             )}
             {!!prepared?.repairs.joins.length && (

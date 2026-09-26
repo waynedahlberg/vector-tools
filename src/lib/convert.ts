@@ -18,6 +18,8 @@ import { memoStage } from "./pipeline";
 import { displayColor } from "./paint";
 import { countDuplicates, repair, type RepairParams, type RepairReport } from "./repair";
 import { analyse, seams, type Problems, type Seam } from "./analysis";
+import { isStrokeOnly, outlineStrokes } from "./outline";
+import { cleanupCurves, cleanupTolerance, type CleanupParams, type CleanupReport } from "./cleanup";
 import { writeStep, type CurveMode, type DrawingPlane, type OutputUnit, type Region } from "./step-writer";
 
 export type OutputGeometry = "curves" | "faces" | "both";
@@ -43,6 +45,12 @@ export type ConvertOptions = {
   gapTolerance: number;
   removeDuplicates: boolean;
   minFeatureSize: number;
+  // Shape: stroke-only shapes become closed outlines of their stroke; cleanup refits curves with
+  // fewer nodes. Strength 0–100 maps to a tolerance relative to the drawing's size.
+  outlineStrokes: boolean;
+  cleanup: boolean;
+  cleanupStrength: number;
+  cornerAngle: number;
   // Transform. In width/height mode the drawing is scaled to `targetSize` (output units) and
   // `scale` is ignored. Rotation is counter-clockwise as seen in CAD.
   sizeMode: SizeMode;
@@ -71,6 +79,10 @@ export const DEFAULT_OPTIONS: ConvertOptions = {
   gapTolerance: 0.05,
   removeDuplicates: false,
   minFeatureSize: 0,
+  outlineStrokes: false,
+  cleanup: false,
+  cleanupStrength: 40,
+  cornerAngle: 30,
   sizeMode: "scale",
   targetSize: 100,
   rotation: 0,
@@ -84,6 +96,8 @@ export const DEFAULT_OPTIONS: ConvertOptions = {
 /** Settings that change the geometry itself; "Reset geometry" turns all of them off. */
 export const GEOMETRY_MODIFIERS = {
   closeGaps: false,
+  outlineStrokes: false,
+  cleanup: false,
   removeDuplicates: false,
   minFeatureSize: 0,
   hiddenLayers: [] as string[],
@@ -119,12 +133,26 @@ export type Prepared = {
   repairs: RepairReport;
   /** Start point and direction of every closed curve, for the seam overlay. */
   seams: Seam[];
+  /** Stroke-only shapes in the selection, and how many were turned into outlines. */
+  strokeOnly: number;
+  outlined: number;
+  cleanup: CleanupReport | null;
+  /** The geometry before outlining/cleanup, for a ghost overlay (empty when neither is on). */
+  ghost: Pt[][];
 };
 
 const MM_PER_UNIT: Record<OutputUnit, number> = { mm: 1, in: 25.4 };
 
 const repairStage = memoStage((shapes: Shape[], p: RepairParams & { extent: number }) =>
   repair(shapes, p, p.extent)
+);
+
+const outlineStage = memoStage((shapes: Shape[], p: { on: boolean; extent: number; cornerAngle: number }) =>
+  p.on ? outlineStrokes(shapes, p) : { shapes, outlined: 0 }
+);
+
+const cleanupStage = memoStage((shapes: Shape[], p: { on: boolean } & CleanupParams) =>
+  p.on ? cleanupCurves(shapes, p) : { shapes, report: null }
 );
 
 const parseStage = memoStage((markup: string, p: { includeHidden: boolean; exactEllipses: boolean }): ParsedSvg => {
@@ -288,7 +316,18 @@ export function prepare(markup: string, opts: ConvertOptions): Prepared {
     minFeatureSize: opts.minFeatureSize,
     extent,
   });
-  let shapes = repaired.shapes;
+  const outlined = outlineStage(repaired.shapes, {
+    on: opts.outlineStrokes,
+    extent,
+    cornerAngle: opts.cornerAngle,
+  });
+  const cleaned = cleanupStage(outlined.shapes, {
+    on: opts.cleanup,
+    tolerance: cleanupTolerance(opts.cleanupStrength, extent),
+    cornerAngle: opts.cornerAngle,
+  });
+  let shapes = cleaned.shapes;
+  const modified = cleaned.shapes !== repaired.shapes; // outline or cleanup changed something
   let m: Mat = [1, 0, 0, 1, 0, 0];
 
   const previewTol = 0.0004;
@@ -336,7 +375,9 @@ export function prepare(markup: string, opts: ConvertOptions): Prepared {
   const originShift = { x: m[4], y: m[5] };
   const joins = repaired.report.joins.map((p) => ({ x: p.x + originShift.x, y: p.y + originShift.y }));
 
-  const warnings = [...parsed.warnings];
+  // The stroke-only notice suggests outlining; drop it once that's on.
+  const warnings = parsed.warnings.filter((w) => !(opts.outlineStrokes && w.includes("stroke-only")));
+  const ghost = modified ? repaired.shapes.map((sh) => flatten(transformShape(sh, m), tol)) : [];
   const openCount = shapes.length - closedIdx.length;
   if (opts.output !== "curves" && openCount > 0) {
     warnings.push(
@@ -362,6 +403,10 @@ export function prepare(markup: string, opts: ConvertOptions): Prepared {
     problems,
     repairs: { ...repaired.report, joins },
     seams: seams(shown, shapes.map(isClosed)),
+    strokeOnly: repaired.shapes.filter(isStrokeOnly).length,
+    outlined: outlined.outlined,
+    cleanup: cleaned.report,
+    ghost,
   };
 }
 

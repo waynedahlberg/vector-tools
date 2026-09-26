@@ -23,6 +23,7 @@
     "@radix-ui/react-tabs": "^1.1.21",
     "@radix-ui/react-tooltip": "^1.2.16",
     "class-variance-authority": "^0.7.1",
+    "clipper2-ts": "^2.0.1-18",
     "cn": "^0.4.0",
     "framer-motion": "^13.4.3",
     "lucide-react": "^1.48.0",

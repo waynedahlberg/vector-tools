@@ -28,10 +28,13 @@ export const GAP_STEPS = {
   mm: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1],
   in: [0.0001, 0.0002, 0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.04],
 };
+const CORNER_STEPS = [10, 15, 20, 30, 45, 60, 90];
 const SPECK_STEPS = {
   mm: [0, 0.05, 0.1, 0.25, 0.5, 1, 2, 5],
   in: [0, 0.002, 0.005, 0.01, 0.02, 0.04, 0.08, 0.2],
 };
+
+const fmtLen = (v: number) => (v === 0 ? "0" : +v.toPrecision(2) >= 0.01 ? String(+v.toFixed(3)) : v.toPrecision(2));
 
 function nearestIndex(steps: number[], value: number) {
   return steps.reduce((best, s, i) => (Math.abs(s - value) < Math.abs(steps[best] - value) ? i : best), 0);
@@ -133,6 +136,8 @@ export function OptionsPanel({
   sizeLabel,
   sizeNote,
   catalog,
+  cleanupReport,
+  strokeOnlyCount,
 }: {
   options: ConvertOptions;
   onChange: (patch: Partial<ConvertOptions>) => void;
@@ -141,6 +146,8 @@ export function OptionsPanel({
   sizeLabel: string | null;
   sizeNote: string | null;
   catalog: Pick<Prepared, "layers" | "colors"> | null;
+  cleanupReport: Prepared["cleanup"] | null;
+  strokeOnlyCount: number;
 }) {
   const unit = options.unit;
   const withUnit = (v: number) => `${v} ${unit}`;
@@ -224,6 +231,58 @@ export function OptionsPanel({
           onChange={(minFeatureSize) => onChange({ minFeatureSize })}
           format={(v) => (v === 0 ? "Off" : withUnit(v))}
         />
+      </Section>
+
+      <Section title="Shape">
+        <Switch
+          label="Outline strokes"
+          checked={options.outlineStrokes}
+          onToggle={() => onChange({ outlineStrokes: !options.outlineStrokes })}
+        />
+        <p className="-mt-1 text-[12px] leading-relaxed text-muted-foreground">
+          {strokeOnlyCount
+            ? `Turns ${strokeOnlyCount} stroke-only shape${strokeOnlyCount === 1 ? "" : "s"} into closed outlines at their visible width.`
+            : "Turns stroke-only shapes into closed outlines at their visible width. This file has none."}
+        </p>
+        <Switch
+          label="Curve cleanup"
+          checked={options.cleanup}
+          onToggle={() => onChange({ cleanup: !options.cleanup })}
+        />
+        <Reveal show={options.cleanup}>
+          <div className="flex flex-col gap-3">
+            <Slider
+              label="Strength"
+              value={options.cleanupStrength}
+              onChange={(v) => onChange({ cleanupStrength: v as number })}
+              min={0}
+              max={100}
+              step={5}
+              formatValue={(v) => `${v}`}
+            />
+            <StepSlider
+              label="Keep corners sharper than"
+              steps={CORNER_STEPS}
+              value={options.cornerAngle}
+              onChange={(cornerAngle) => onChange({ cornerAngle })}
+              format={(v) => `${v}°`}
+            />
+            {cleanupReport && (
+              <div className="flex flex-col gap-0.5 rounded-lg bg-surface-1 px-3 py-2 shadow-surface-1">
+                <span className="text-[13px] font-medium tabular-nums text-foreground">
+                  {cleanupReport.nodesBefore} → {cleanupReport.nodesAfter} nodes
+                </span>
+                <span className="text-[12px] tabular-nums text-muted-foreground">
+                  Max deviation {fmtLen(cleanupReport.maxDeviation)} {unit} (limit {fmtLen(cleanupReport.tolerance)} {unit})
+                </span>
+              </div>
+            )}
+            <p className="text-[12px] leading-relaxed text-muted-foreground">
+              Refits curves with fewer nodes. Straight lines, corners and exact circles are kept. The original shows
+              as a ghost in the 3D preview; turn this off to go back to it exactly.
+            </p>
+          </div>
+        </Reveal>
       </Section>
 
       <Section title="Size & units">

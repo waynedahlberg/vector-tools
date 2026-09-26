@@ -111,6 +111,7 @@ export function Converter() {
     }
   }, [file, options]);
 
+  const strokeOnlyCount = prepared?.strokeOnly ?? 0;
   const width = prepared?.bounds ? prepared.bounds.maxX - prepared.bounds.minX : 0;
   const height = prepared?.bounds ? prepared.bounds.maxY - prepared.bounds.minY : 0;
   const hasOutput =
@@ -310,6 +311,8 @@ export function Converter() {
               sizeLabel={prepared?.bounds ? formatSize(width, height, options.unit) : null}
               sizeNote={prepared?.sizeNote ?? null}
               catalog={prepared}
+              cleanupReport={prepared?.cleanup ?? null}
+              strokeOnlyCount={strokeOnlyCount}
             />
 
             <div className="flex flex-col gap-3 border-t border-border pt-5">
