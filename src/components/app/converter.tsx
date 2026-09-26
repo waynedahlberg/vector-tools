@@ -16,6 +16,7 @@ import { downloadText, formatSize } from "@/lib/format";
 
 const OPTIONS_KEY = "svg2step:options";
 const VIEW_KEY = "svg2step:view";
+const NODES_KEY = "svg2step:nodes";
 
 // Layout of the floating chrome, in px. Panels sit below the top bar and above the history dock.
 const EDGE = 16;
@@ -32,6 +33,14 @@ function baseName(name: string) {
 
 function safeFileName(name: string) {
   return (name.trim() || "drawing").replace(/[\\/:*?"<>|]+/g, "-").replace(/\.(step|stp)$/i, "");
+}
+
+function readFlag(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === "true";
+  } catch {
+    return false;
+  }
 }
 
 function initialView(): View {
@@ -88,6 +97,7 @@ function Workspace() {
   const [dragging, setDragging] = useState(false);
   const [view, setView] = useState<View>(initialView);
   const [showSeams, setShowSeams] = useState(false);
+  const [showNodes, setShowNodes] = useState(() => readFlag(NODES_KEY));
   const viewportRef = useRef<ViewportApi | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -278,6 +288,7 @@ function Workspace() {
         options={options}
         view={view}
         showSeams={showSeams}
+        showNodes={showNodes}
         viewportApi={viewportRef}
         insets={insets}
         dragging={dragging}
@@ -292,6 +303,13 @@ function Workspace() {
         onView={chooseView}
         showSeams={showSeams}
         onToggleSeams={() => setShowSeams((v) => !v)}
+        showNodes={showNodes}
+        onToggleNodes={() => {
+          setShowNodes(!showNodes);
+          try {
+            localStorage.setItem(NODES_KEY, String(!showNodes));
+          } catch {}
+        }}
         onCamera={(mode) => viewportRef.current?.view(mode)}
         canUndo={canUndo}
         canRedo={canRedo}

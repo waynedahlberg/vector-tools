@@ -32,6 +32,7 @@ The 3D preview (or, with no file open, the drop zone) fills the window. Everythi
 - **Navigation gizmo** (top-right of the view): click X, Y or Z to animate to that axis view, always centred on the drawing's extents; click the axis you're already looking down to flip to the opposite side; drag the gizmo to orbit. Negative axes are the darker balls.
 - **Auto perspective**: axis views switch to orthographic; orbiting away returns to perspective unless orthographic was chosen with the grid button.
 - **Tool strip** under the gizmo: drag the magnifier to zoom, drag the hand to pan, click the grid to toggle perspective/orthographic.
+- **Nodes** (spline icon in the top bar): shows the exported curves' anchor points and Bézier handles (or the vertices in polyline mode) with a live node count, handy for judging curve cleanup. Exact circles and ellipses have no nodes in STEP.
 - **Mouse**: left-drag orbits, right-drag (or Shift+drag) pans, the wheel zooms. The current view's name ("Top Orthographic", "User Perspective") shows in the legend.
 
 The app needs a window at least 1024 px wide; smaller screens see a note that it's best on desktop.

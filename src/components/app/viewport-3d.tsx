@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import * as THREE from "three";
 import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
@@ -9,6 +9,7 @@ import type { ConvertOptions, Prepared } from "@/lib/convert";
 import type { Pt } from "@/lib/geometry";
 import { planeMap, type DrawingPlane } from "@/lib/step-writer";
 import type { AxisKey } from "@/lib/camera";
+import { polylineNodes, splineNodes } from "@/lib/nodes";
 import { ISO_ANGLES, ViewController, type Insets } from "./view-controller";
 import { NavGizmo } from "./nav-gizmo";
 
@@ -26,6 +27,7 @@ const COLORS = {
   open: 0xffb224,
   face: 0x3ee6ff,
   vertex: 0xf5f7fa,
+  handle: 0x8fa3bf,
   openEnd: 0xffb224,
   selfIntersection: 0xff4d4f,
   join: 0x30d158,
@@ -116,6 +118,9 @@ type Scene = {
 /** Camera commands for toolbars that live outside the canvas. */
 export type ViewportApi = { view: (mode: "face" | "iso" | "fit") => void };
 
+/** Beyond this many nodes the overlay would be unreadable and slow, so it isn't drawn. */
+const MAX_NODES = 60000;
+
 const NO_INSETS: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
 
 /** The 3D preview canvas. It fills its parent; toolbars drive it through `apiRef`. */
@@ -124,6 +129,7 @@ export function Viewport3D({
   options,
   fileKey,
   showSeams,
+  showNodes = false,
   apiRef,
   insets = NO_INSETS,
 }: {
@@ -131,6 +137,7 @@ export function Viewport3D({
   options: ConvertOptions;
   fileKey: string;
   showSeams: boolean;
+  showNodes?: boolean;
   apiRef?: RefObject<ViewportApi | null>;
   insets?: Insets;
 }) {
@@ -163,6 +170,13 @@ export function Viewport3D({
       apiRef.current = null;
     };
   }, [apiRef, controller]);
+  // Nodes of what's exported: open paths are left out of face-only output.
+  const nodes = useMemo(() => {
+    if (!prepared) return { anchors: [], handles: [] };
+    const keepOpen = options.output !== "faces";
+    if (options.curveMode === "polyline") return polylineNodes(prepared.polylines.filter((p) => keepOpen || p.closed));
+    return splineNodes(prepared.shapes.filter((sh) => keepOpen || sh.type === "ellipse" || sh.closed));
+  }, [prepared, options.output, options.curveMode]);
   const gridLabel = prepared?.bounds ? `${+gridStepFor(prepared.bounds).toPrecision(3)} ${options.unit}` : "";
 
   // One-time renderer setup and pointer navigation.
@@ -365,27 +379,32 @@ export function Viewport3D({
     // --- Curves: high-visibility lines, sampled exactly as exported.
     const showCurves = options.output !== "faces";
     const closedPts: number[] = [], openPts: number[] = [];
-    const vertexPts: number[] = [];
     for (const pl of prepared.polylines) {
       if (!showCurves && !pl.closed) continue;
       segmentsOf(pl.pts, pl.closed ? closedPts : openPts);
-      if (options.curveMode === "polyline") for (const p of pl.pts) vertexPts.push(p.x, p.y, 0);
     }
     if (closedPts.length) s.geometry.add(fatLines(closedPts, COLORS.closed, 2, s.resolution));
     if (openPts.length) s.geometry.add(fatLines(openPts, COLORS.open, 2, s.resolution));
-    if (vertexPts.length && vertexPts.length / 3 <= 60000) {
-      const g = new THREE.BufferGeometry();
-      g.setAttribute("position", new THREE.Float32BufferAttribute(vertexPts, 3));
-      const points = new THREE.Points(
-        g,
-        new THREE.PointsMaterial({ color: COLORS.vertex, size: 3.5, sizeAttenuation: false })
-      );
-      points.renderOrder = 4;
-      s.geometry.add(points);
-    }
     s.geometry.children.forEach((c) => {
       if (c.renderOrder === 0) c.renderOrder = 3;
     });
+
+    // --- Nodes: spline anchors and Bézier handles, or the exported polyline vertices.
+    if (showNodes && nodes.anchors.length <= MAX_NODES) {
+      if (nodes.handles.length) {
+        const pts: number[] = [];
+        for (const [a, b] of nodes.handles) pts.push(a.x, a.y, 0, b.x, b.y, 0);
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
+        const lines = new THREE.LineSegments(
+          g,
+          new THREE.LineBasicMaterial({ color: COLORS.handle, transparent: true, opacity: 0.75, depthTest: false })
+        );
+        lines.renderOrder = 7;
+        s.geometry.add(lines, markers(nodes.handles.map(([, b]) => b), COLORS.handle, 4));
+      }
+      s.geometry.add(markers(nodes.anchors, COLORS.vertex, 5.5));
+    }
 
     // --- Problem markers and the optional seam/direction overlay.
     const { problems, repairs } = prepared;
@@ -435,7 +454,7 @@ export function Viewport3D({
       lastFit.current = { key: fileKey, center, radius };
     }
     s.invalidate();
-  }, [prepared, options.output, options.curveMode, options.unit, options.plane, fileKey, showSeams, controller]);
+  }, [prepared, options.output, options.curveMode, options.unit, options.plane, fileKey, showSeams, showNodes, nodes, controller]);
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-[#17191d]">
@@ -468,6 +487,14 @@ export function Viewport3D({
           {!!prepared?.problems.selfIntersections.length && (
             <span className="flex items-center gap-1.5">
               <span className="size-2 rounded-full bg-[#ff4d4f]" />Crossing
+            </span>
+          )}
+          {showNodes && (
+            <span className="flex items-center gap-1.5 tabular-nums">
+              <span className="size-2 rounded-full bg-[#f5f7fa]" />
+              {nodes.anchors.length > MAX_NODES
+                ? `${nodes.anchors.length.toLocaleString()} nodes (too many to draw)`
+                : `${nodes.anchors.length.toLocaleString()} ${nodes.anchors.length === 1 ? "node" : "nodes"}`}
             </span>
           )}
           {!!prepared?.ghost.length && (

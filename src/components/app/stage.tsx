@@ -26,6 +26,7 @@ export function Stage({
   options,
   view,
   showSeams,
+  showNodes,
   viewportApi,
   insets,
   dragging,
@@ -37,6 +38,7 @@ export function Stage({
   options: ConvertOptions;
   view: View;
   showSeams: boolean;
+  showNodes: boolean;
   viewportApi: RefObject<ViewportApi | null>;
   insets: Insets;
   dragging: boolean;
@@ -61,6 +63,7 @@ export function Stage({
               options={options}
               fileKey={`${file.name}:${file.svg.length}`}
               showSeams={showSeams}
+              showNodes={showNodes}
               apiRef={viewportApi}
               insets={insets}
             />

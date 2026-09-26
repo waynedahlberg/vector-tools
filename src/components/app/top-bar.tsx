@@ -1,6 +1,6 @@
 "use client";
 
-import { Box, FileCode2, FolderOpen, Maximize, Redo2, RotateCcw, Square, Undo2, Waypoints, X } from "lucide-react";
+import { Box, FileCode2, FolderOpen, Maximize, Redo2, RotateCcw, Spline, Square, Undo2, Waypoints, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { TabsSubtle, TabsSubtleItem } from "@/components/ui/tabs-subtle";
@@ -28,6 +28,8 @@ export function TopBar({
   onView,
   showSeams,
   onToggleSeams,
+  showNodes,
+  onToggleNodes,
   onCamera,
   canUndo,
   canRedo,
@@ -43,6 +45,8 @@ export function TopBar({
   onView: (v: View) => void;
   showSeams: boolean;
   onToggleSeams: () => void;
+  showNodes: boolean;
+  onToggleNodes: () => void;
   onCamera: (mode: "face" | "iso" | "fit") => void;
   canUndo: boolean;
   canRedo: boolean;
@@ -96,6 +100,18 @@ export function TopBar({
           {view === "3d" && (
             <>
               <span className="mx-1 h-5 w-px bg-border" aria-hidden />
+              <Tooltip content={showNodes ? "Hide nodes" : "Show nodes and handles"}>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Show nodes"
+                  aria-pressed={showNodes}
+                  active={showNodes}
+                  onClick={onToggleNodes}
+                >
+                  <Spline />
+                </Button>
+              </Tooltip>
               <Tooltip content={showSeams ? "Hide start points & direction" : "Show start points & direction"}>
                 <Button
                   variant="ghost"
