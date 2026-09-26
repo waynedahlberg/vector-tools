@@ -8,7 +8,8 @@ import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { InputGroup, InputField } from "@/components/ui/input-group";
-import type { ConvertOptions, OriginMode, OutputGeometry, SizeSource } from "@/lib/convert";
+import type { ConvertOptions, OriginMode, OutputGeometry, Prepared, SizeSource } from "@/lib/convert";
+import { SelectionSection } from "./selection-section";
 
 const OUTPUT_HELP: Record<OutputGeometry, string> = {
   curves: "Wireframe curves, one per closed or open path. Select them in Plasticity to extrude.",
@@ -103,6 +104,7 @@ export function OptionsPanel({
   onFileName,
   sizeLabel,
   sizeNote,
+  catalog,
 }: {
   options: ConvertOptions;
   onChange: (patch: Partial<ConvertOptions>) => void;
@@ -114,6 +116,7 @@ export function OptionsPanel({
   onFileName: (v: string) => void;
   sizeLabel: string | null;
   sizeNote: string | null;
+  catalog: Pick<Prepared, "layers" | "colors"> | null;
 }) {
   const unit = options.unit;
   const withUnit = (v: number) => `${v} ${unit}`;
@@ -160,6 +163,12 @@ export function OptionsPanel({
           />
         </Reveal>
       </Section>
+
+      {catalog && (catalog.layers.length > 1 || catalog.colors.length > 1) && (
+        <Section title="Layers & colours">
+          <SelectionSection catalog={catalog} options={options} onChange={onChange} />
+        </Section>
+      )}
 
       <Section title="Repair">
         <Switch

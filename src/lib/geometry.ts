@@ -277,3 +277,61 @@ export function reverseShape(s: Shape): Shape {
       ),
   };
 }
+
+/** Parameters in (0, 1) where one coordinate of a cubic Bézier has a local extremum. */
+function cubicExtrema(a: number, b: number, c: number, d: number): number[] {
+  // Derivative coefficients: 3[(−a+3b−3c+d)t² + 2(a−2b+c)t + (b−a)]
+  const qa = -a + 3 * b - 3 * c + d, qb = 2 * (a - 2 * b + c), qc = b - a;
+  const out: number[] = [];
+  if (Math.abs(qa) < 1e-12) {
+    if (Math.abs(qb) > 1e-12) out.push(-qc / qb);
+  } else {
+    const disc = qb * qb - 4 * qa * qc;
+    if (disc >= 0) {
+      const r = Math.sqrt(disc);
+      out.push((-qb + r) / (2 * qa), (-qb - r) / (2 * qa));
+    }
+  }
+  return out.filter((t) => t > 0 && t < 1);
+}
+
+/** Exact bounding box of a shape (curve extrema, not control points or a flattened copy). */
+export function shapeBounds(s: Shape): Bounds {
+  if (s.type === "ellipse") {
+    const { x: ax, y: ay } = s.axis;
+    const hx = Math.hypot(s.rx * ax, s.ry * ay);
+    const hy = Math.hypot(s.rx * ay, s.ry * ax);
+    return { minX: s.center.x - hx, maxX: s.center.x + hx, minY: s.center.y - hy, maxY: s.center.y + hy };
+  }
+  const pts: Pt[] = [];
+  for (const g of s.segments) {
+    pts.push(g.p0);
+    if (g.kind === "line") {
+      pts.push(g.p1);
+      continue;
+    }
+    pts.push(g.p3);
+    const ts = [
+      ...cubicExtrema(g.p0.x, g.p1.x, g.p2.x, g.p3.x),
+      ...cubicExtrema(g.p0.y, g.p1.y, g.p2.y, g.p3.y),
+    ];
+    for (const t of ts) pts.push(cubicPoint(g, t));
+  }
+  return boundsOf([pts])!;
+}
+
+export function unionBounds(list: Shape[]): Bounds | null {
+  let b: Bounds | null = null;
+  for (const s of list) {
+    const sb = shapeBounds(s);
+    b = b
+      ? {
+          minX: Math.min(b.minX, sb.minX),
+          minY: Math.min(b.minY, sb.minY),
+          maxX: Math.max(b.maxX, sb.maxX),
+          maxY: Math.max(b.maxY, sb.maxY),
+        }
+      : sb;
+  }
+  return b;
+}

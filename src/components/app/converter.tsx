@@ -13,7 +13,7 @@ import { HistoryPanel } from "./history-panel";
 import { useOptionsHistory } from "./use-options-history";
 import { ProblemsList } from "./problems-list";
 import dynamic from "next/dynamic";
-import { DEFAULT_OPTIONS, GEOMETRY_MODIFIERS, prepare, toStep, type ConvertOptions, type Prepared } from "@/lib/convert";
+import { DEFAULT_OPTIONS, GEOMETRY_MODIFIERS, PER_FILE_OPTIONS, prepare, toStep, type ConvertOptions, type Prepared } from "@/lib/convert";
 import { addHistory, clearHistory, deleteHistory, listHistory, type HistoryEntry } from "@/lib/history";
 import { downloadText, formatBytes, formatSize } from "@/lib/format";
 
@@ -109,6 +109,8 @@ export function Converter() {
   };
 
   const loadFile = (f: LoadedFile) => {
+    // Layer and colour choices belong to the previous file.
+    if (options.hiddenLayers.length || options.hiddenColors.length) setOptions({ ...options, ...PER_FILE_OPTIONS });
     setFile(f);
     setFileName(baseName(f.name));
     setLoadError(null);
@@ -327,6 +329,7 @@ export function Converter() {
               }}
               sizeLabel={prepared?.bounds ? formatSize(width, height, options.unit) : null}
               sizeNote={prepared?.sizeNote ?? null}
+              catalog={prepared}
             />
 
             <div className="flex flex-col gap-3 border-t border-border pt-5">

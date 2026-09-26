@@ -1,11 +1,11 @@
 import {
-  boundsOf,
   flatten,
   pointInPolygon,
   signedArea,
   reverseShape,
   smoothSeam,
   transformShape,
+  unionBounds,
   type Bounds,
   type PathShape,
   type Mat,
@@ -14,6 +14,7 @@ import {
 } from "./geometry";
 import { parseSvg, type ParsedSvg, type SvgLayer } from "./svg-parser";
 import { memoStage } from "./pipeline";
+import { displayColor } from "./paint";
 import { countDuplicates, repair, type RepairParams, type RepairReport } from "./repair";
 import { analyse, seams, type Problems, type Seam } from "./analysis";
 import { writeStep, type CurveMode, type OutputUnit, type Region } from "./step-writer";
@@ -39,6 +40,9 @@ export type ConvertOptions = {
   gapTolerance: number;
   removeDuplicates: boolean;
   minFeatureSize: number;
+  // Selection (per file): layer keys and display colours to leave out.
+  hiddenLayers: string[];
+  hiddenColors: string[];
 };
 
 export const DEFAULT_OPTIONS: ConvertOptions = {
@@ -56,6 +60,8 @@ export const DEFAULT_OPTIONS: ConvertOptions = {
   gapTolerance: 0.05,
   removeDuplicates: false,
   minFeatureSize: 0,
+  hiddenLayers: [],
+  hiddenColors: [],
 };
 
 /** Settings that change the geometry itself; "Reset geometry" turns all of them off. */
@@ -63,6 +69,14 @@ export const GEOMETRY_MODIFIERS = {
   closeGaps: false,
   removeDuplicates: false,
   minFeatureSize: 0,
+  hiddenLayers: [] as string[],
+  hiddenColors: [] as string[],
+} satisfies Partial<ConvertOptions>;
+
+/** Settings that only make sense for the file they were chosen on. */
+export const PER_FILE_OPTIONS = {
+  hiddenLayers: [] as string[],
+  hiddenColors: [] as string[],
 } satisfies Partial<ConvertOptions>;
 
 export type Prepared = {
@@ -80,8 +94,10 @@ export type Prepared = {
   polylines: { pts: Pt[]; closed: boolean }[];
   /** Face outlines and holes for filled previews, matching `regions`. */
   regionPolys: { outer: Pt[]; holes: Pt[][] }[];
-  /** Top-level groups found in the SVG. */
-  layers: SvgLayer[];
+  /** Top-level groups found in the SVG, with how many shapes each holds (before filtering). */
+  layers: (SvgLayer & { count: number })[];
+  /** Display colours found in the SVG (fill, or stroke when unfilled), most common first. */
+  colors: { color: string; count: number }[];
   problems: Problems;
   repairs: RepairReport;
   /** Start point and direction of every closed curve, for the seam overlay. */
@@ -99,13 +115,34 @@ const parseStage = memoStage((markup: string, p: { includeHidden: boolean; exact
   return parseSvg(doc, p);
 });
 
-/** Scale into output units and flip Y so the drawing reads upright in CAD. */
-const placeStage = memoStage(
-  (parsed: ParsedSvg, p: { k: number; vbx: number; vby: number }): Shape[] => {
-    const m: Mat = [p.k, 0, 0, -p.k, -p.vbx * p.k, p.vby * p.k];
-    return parsed.shapes.map((s) => transformShape(s, m));
+const catalogStage = memoStage((parsed: ParsedSvg) => {
+  const layerCounts = new Map<string, number>();
+  const colorCounts = new Map<string, number>();
+  for (const s of parsed.shapes) {
+    layerCounts.set(s.meta.layer, (layerCounts.get(s.meta.layer) ?? 0) + 1);
+    const c = displayColor(s.meta.fill, s.meta.stroke);
+    colorCounts.set(c, (colorCounts.get(c) ?? 0) + 1);
   }
-);
+  return {
+    layers: parsed.layers.map((l) => ({ ...l, count: layerCounts.get(l.id) ?? 0 })),
+    colors: [...colorCounts].map(([color, count]) => ({ color, count })).sort((a, b) => b.count - a.count),
+  };
+});
+
+/** Leave out hidden layers and colours. Returns the parsed array itself when nothing is hidden. */
+const selectStage = memoStage((parsed: ParsedSvg, p: { hiddenLayers: string[]; hiddenColors: string[] }) => {
+  if (!p.hiddenLayers.length && !p.hiddenColors.length) return parsed.shapes;
+  const layers = new Set(p.hiddenLayers), colors = new Set(p.hiddenColors);
+  return parsed.shapes.filter(
+    (s) => !layers.has(s.meta.layer) && !colors.has(displayColor(s.meta.fill, s.meta.stroke))
+  );
+});
+
+/** Scale into output units and flip Y so the drawing reads upright in CAD. */
+const placeStage = memoStage((shapes: Shape[], p: { k: number; vbx: number; vby: number }): Shape[] => {
+  const m: Mat = [p.k, 0, 0, -p.k, -p.vbx * p.k, p.vby * p.k];
+  return shapes.map((s) => transformShape(s, m));
+});
 
 function userUnitToMm(parsed: ParsedSvg, opts: ConvertOptions): { mm: number; note: string } {
   const pxMm = 25.4 / opts.dpi;
@@ -183,9 +220,12 @@ export function prepare(markup: string, opts: ConvertOptions): Prepared {
   const { mm, note } = userUnitToMm(parsed, opts);
   const vb = parsed.info.viewBox;
   const k = (mm * opts.scale) / MM_PER_UNIT[opts.unit];
-  const placed = placeStage(parsed, { k, vbx: vb?.[0] ?? 0, vby: vb?.[1] ?? 0 });
-  const rough = boundsOf(placed.map((s) => flatten(s, Infinity)));
-  const extent = rough ? Math.max(rough.maxX - rough.minX, rough.maxY - rough.minY, 1e-9) : 1;
+  const selected = selectStage(parsed, { hiddenLayers: opts.hiddenLayers, hiddenColors: opts.hiddenColors });
+  const placed = placeStage(selected, { k, vbx: vb?.[0] ?? 0, vby: vb?.[1] ?? 0 });
+  const placedBounds = unionBounds(placed);
+  const extent = placedBounds
+    ? Math.max(placedBounds.maxX - placedBounds.minX, placedBounds.maxY - placedBounds.minY, 1e-9)
+    : 1;
 
   const repaired = repairStage(placed, {
     closeGaps: opts.closeGaps,
@@ -198,26 +238,18 @@ export function prepare(markup: string, opts: ConvertOptions): Prepared {
   let m: Mat = [1, 0, 0, 1, 0, 0];
 
   const previewTol = 0.0004;
-  const measure = (list: Shape[]) => {
-    const rough = boundsOf(list.map((s) => flatten(s, Infinity)));
-    const extent = rough ? Math.max(rough.maxX - rough.minX, rough.maxY - rough.minY, 1e-6) : 1;
-    return boundsOf(list.map((s) => flatten(s, extent * 1e-4)));
-  };
-  let bounds = measure(shapes);
+  let bounds = unionBounds(shapes);
   if (bounds && opts.origin !== "svg") {
     const dx = opts.origin === "center" ? -(bounds.minX + bounds.maxX) / 2 : -bounds.minX;
     const dy = opts.origin === "center" ? -(bounds.minY + bounds.maxY) / 2 : -bounds.minY;
     m = [1, 0, 0, 1, dx, dy];
     shapes = shapes.map((s) => transformShape(s, m));
+    bounds = { minX: bounds.minX + dx, maxX: bounds.maxX + dx, minY: bounds.minY + dy, maxY: bounds.maxY + dy };
   }
 
-  const size = (() => {
-    const b = measure(shapes);
-    return b ? Math.max(b.maxX - b.minX, b.maxY - b.minY) : 1;
-  })();
+  const size = bounds ? Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) : 1;
   const tol = Math.max(size * previewTol, 1e-6);
   const polys = shapes.map((s) => flatten(s, tol));
-  bounds = boundsOf(polys);
 
   const isClosed = (s: Shape) => s.type === "ellipse" || s.closed;
   const closedIdx = shapes.map((s, i) => (isClosed(s) ? i : -1)).filter((i) => i >= 0);
@@ -272,7 +304,7 @@ export function prepare(markup: string, opts: ConvertOptions): Prepared {
     previewPaths: shapes.map((s, i) => ({ d: toPathD(shown[i], isClosed(s)), closed: isClosed(s) })),
     polylines: shapes.map((s, i) => ({ pts: shown[i], closed: isClosed(s) })),
     regionPolys: regionIdx.map((r) => ({ outer: shown[r.outer], holes: r.holes.map((h) => shown[h]) })),
-    layers: parsed.layers,
+    ...catalogStage(parsed, null),
     problems,
     repairs: { ...repaired.report, joins },
     seams: seams(shown, shapes.map(isClosed)),
