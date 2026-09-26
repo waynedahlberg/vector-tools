@@ -27,6 +27,13 @@ The app is a single static page with no server code or environment variables. Im
 
 The 3D preview (or, with no file open, the drop zone) fills the window. Everything else floats over it: the file, view tabs and undo/redo along the top; the **Source** panel on the left (checks, layers and colours, repair, shape); the **Output** panel on the right (output type, precision, size, transform, placement, with the file name and Convert pinned at the bottom); and the conversion history docked along the bottom. The 3D camera centres the drawing in the space between the panels. Open another file with the Open button, Ctrl+O, or by dropping it anywhere.
 
+### 3D navigation (Blender-style)
+
+- **Navigation gizmo** (top-right of the view): click X, Y or Z to animate to that axis view, always centred on the drawing's extents; click the axis you're already looking down to flip to the opposite side; drag the gizmo to orbit. Negative axes are the darker balls.
+- **Auto perspective**: axis views switch to orthographic; orbiting away returns to perspective unless orthographic was chosen with the grid button.
+- **Tool strip** under the gizmo: drag the magnifier to zoom, drag the hand to pan, click the grid to toggle perspective/orthographic.
+- **Mouse**: left-drag orbits, right-drag (or Shift+drag) pans, the wheel zooms. The current view's name ("Top Orthographic", "User Perspective") shows in the legend.
+
 The app needs a window at least 1024 px wide; smaller screens see a note that it's best on desktop.
 
 ## Options

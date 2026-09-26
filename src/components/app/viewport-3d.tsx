@@ -1,14 +1,18 @@
 "use client";
 
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import * as THREE from "three";
-import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import type { ConvertOptions, Prepared } from "@/lib/convert";
 import type { Pt } from "@/lib/geometry";
 import { planeMap, type DrawingPlane } from "@/lib/step-writer";
+import type { AxisKey } from "@/lib/camera";
+import { ISO_ANGLES, ViewController, type Insets } from "./view-controller";
+import { NavGizmo } from "./nav-gizmo";
+
+export type { Insets } from "./view-controller";
 
 // The viewport keeps a dark CAD-style canvas in both themes, like Plasticity's.
 const COLORS = {
@@ -61,14 +65,8 @@ function markers(points: Pt[], color: number, size: number) {
   return pts;
 }
 
-const ISO_DIR = new THREE.Vector3(0.55, -1, 0.95).normalize();
-
-/** Direction from the drawing towards a camera looking straight at it. */
-function faceOnDir(plane: DrawingPlane) {
-  const [x, y, z] = planeMap(plane).normal;
-  // Looking straight down Z would be parallel to the camera's up vector, so tilt it a hair.
-  return new THREE.Vector3(x, plane === "xy" ? -1e-4 : y, z).normalize();
-}
+/** The axis view that looks straight at a drawing plane. */
+const FACE_ON: Record<DrawingPlane, AxisKey> = { xy: "+z", xz: "-y", yz: "+x" };
 
 /** 1, 2 or 5 × 10ⁿ, the usual CAD grid steps. */
 function niceStep(raw: number) {
@@ -109,22 +107,15 @@ function segmentsOf(pts: Pt[], out: number[]) {
 type Scene = {
   renderer: THREE.WebGLRenderer;
   scene: THREE.Scene;
-  camera: THREE.PerspectiveCamera;
-  controls: OrbitControls;
   grid: THREE.Group;
   geometry: THREE.Group;
   resolution: THREE.Vector2;
   invalidate: () => void;
-  fit: (dir?: THREE.Vector3) => void;
-  applyInsets: () => void;
-  frame: { center: THREE.Vector3; radius: number } | null;
 };
 
 /** Camera commands for toolbars that live outside the canvas. */
 export type ViewportApi = { view: (mode: "face" | "iso" | "fit") => void };
 
-/** Space covered by floating panels on each side, in CSS pixels. */
-export type Insets = { top: number; right: number; bottom: number; left: number };
 const NO_INSETS: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
 
 /** The 3D preview canvas. It fills its parent; toolbars drive it through `apiRef`. */
@@ -147,33 +138,38 @@ export function Viewport3D({
   const sceneRef = useRef<Scene | null>(null);
   const lastFit = useRef<{ key: string; center: THREE.Vector3; radius: number } | null>(null);
   const planeRef = useRef(options.plane);
-  const insetsRef = useRef(insets);
+  // The camera controller exists for the component's lifetime; the renderer attaches to it.
+  const [controller] = useState(() => new ViewController());
+  const snap = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
+
   useEffect(() => {
     planeRef.current = options.plane;
   }, [options.plane]);
 
   useEffect(() => {
-    insetsRef.current = insets;
-    sceneRef.current?.applyInsets();
-  }, [insets]);
+    controller.setInsets(insets);
+  }, [controller, insets]);
 
   useEffect(() => {
     if (!apiRef) return;
     apiRef.current = {
-      view: (mode) =>
-        sceneRef.current?.fit(mode === "face" ? faceOnDir(planeRef.current) : mode === "iso" ? ISO_DIR : undefined),
+      view: (mode) => {
+        if (mode === "face") controller.clickAxis(FACE_ON[planeRef.current]);
+        else if (mode === "iso") controller.lookFrom(ISO_ANGLES);
+        else controller.fit({ animate: true });
+      },
     };
     return () => {
       apiRef.current = null;
     };
-  }, [apiRef]);
+  }, [apiRef, controller]);
   const gridLabel = prepared?.bounds ? `${+gridStepFor(prepared.bounds).toPrecision(3)} ${options.unit}` : "";
 
-  // One-time renderer, camera and controls setup.
+  // One-time renderer setup and pointer navigation.
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    lastFit.current = null; // a fresh camera always needs framing (also covers StrictMode remounts)
+    lastFit.current = null; // a fresh renderer always needs framing (also covers StrictMode remounts)
 
     let renderer: THREE.WebGLRenderer;
     try {
@@ -186,80 +182,30 @@ export function Viewport3D({
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setClearColor(COLORS.background);
     host.appendChild(renderer.domElement);
-    renderer.domElement.style.display = "block";
-    renderer.domElement.style.touchAction = "none";
+    const canvas = renderer.domElement;
+    canvas.style.display = "block";
+    canvas.style.touchAction = "none";
 
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(35, 1, 0.01, 1000);
-    camera.up.set(0, 0, 1); // Z-up, matching Plasticity and most CAD tools
-
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.12;
-    controls.screenSpacePanning = true;
-
     const grid = new THREE.Group();
     const geometry = new THREE.Group();
     scene.add(grid, geometry);
 
     const resolution = new THREE.Vector2(1, 1);
-    let size = { w: 1, h: 1 };
     let needsRender = true;
     const invalidate = () => {
       needsRender = true;
     };
-    controls.addEventListener("change", invalidate);
-
-    const s: Scene = {
-      renderer,
-      scene,
-      camera,
-      controls,
-      grid,
-      geometry,
-      resolution,
-      invalidate,
-      frame: null,
-      // Panels float over the canvas, so shift the projection centre into the visible gap
-      // between them rather than the middle of the whole canvas.
-      applyInsets: () => {
-        const i = insetsRef.current;
-        camera.setViewOffset(size.w, size.h, (i.right - i.left) / 2, (i.bottom - i.top) / 2, size.w, size.h);
-        invalidate();
-      },
-      fit: (dir) => {
-        if (!s.frame) return;
-        const { center, radius } = s.frame;
-        const current = camera.position.clone().sub(controls.target);
-        const d = dir ?? (current.lengthSq() > 1e-12 ? current.normalize() : ISO_DIR);
-        // Fit the drawing to the visible gap, using whichever field of view is tighter there.
-        const i = insetsRef.current;
-        const visW = Math.max(size.w - i.left - i.right, 80);
-        const visH = Math.max(size.h - i.top - i.bottom, 80);
-        const tanV = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-        const vHalf = Math.atan((tanV * visH) / size.h);
-        const hHalf = Math.atan((tanV * visW) / size.h);
-        const dist = (radius / Math.tan(Math.min(vHalf, hHalf))) * 1.15;
-        camera.near = dist / 1000;
-        camera.far = dist * 100;
-        camera.updateProjectionMatrix();
-        controls.target.copy(center);
-        camera.position.copy(center).addScaledVector(d, dist);
-        controls.update();
-        invalidate();
-      },
-    };
-    sceneRef.current = s;
+    controller.setOnChange(invalidate);
+    sceneRef.current = { renderer, scene, grid, geometry, resolution, invalidate };
 
     const resize = () => {
       const w = host.clientWidth, h = host.clientHeight;
       if (!w || !h) return;
       renderer.setSize(w, h, false);
-      renderer.domElement.style.width = `${w}px`;
-      renderer.domElement.style.height = `${h}px`;
-      size = { w, h };
-      camera.aspect = w / h;
-      s.applyInsets();
+      canvas.style.width = `${w}px`;
+      canvas.style.height = `${h}px`;
+      controller.setSize(w, h);
       resolution.set(w, h);
       scene.traverse((o) => {
         const mat = (o as THREE.Mesh).material;
@@ -271,27 +217,64 @@ export function Viewport3D({
     ro.observe(host);
     resize();
 
+    // Left-drag orbits; right-drag, middle-drag or Shift+drag pans; the wheel zooms.
+    let drag: { x: number; y: number; mode: "orbit" | "pan" } | null = null;
+    const onDown = (e: PointerEvent) => {
+      try {
+        canvas.setPointerCapture(e.pointerId);
+      } catch {}
+      drag = { x: e.clientX, y: e.clientY, mode: e.button === 0 && !e.shiftKey ? "orbit" : "pan" };
+    };
+    const onMove = (e: PointerEvent) => {
+      if (!drag) return;
+      const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      drag.x = e.clientX;
+      drag.y = e.clientY;
+      if (drag.mode === "orbit") controller.orbitBy(dx, dy);
+      else controller.panBy(dx, dy);
+    };
+    const onUp = () => {
+      drag = null;
+    };
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      controller.zoomBy(Math.exp(-e.deltaY * 0.0015));
+    };
+    const onContext = (e: Event) => e.preventDefault();
+    canvas.addEventListener("pointerdown", onDown);
+    canvas.addEventListener("pointermove", onMove);
+    canvas.addEventListener("pointerup", onUp);
+    canvas.addEventListener("pointercancel", onUp);
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    canvas.addEventListener("contextmenu", onContext);
+
     let raf = 0;
-    const loop = () => {
+    const loop = (now: number) => {
       raf = requestAnimationFrame(loop);
-      controls.update(); // advances damping; fires "change" while moving
+      controller.tick(now); // advances view animations; marks the frame dirty while moving
       if (!needsRender) return;
       needsRender = false;
-      renderer.render(scene, camera);
+      renderer.render(scene, controller.camera);
     };
-    loop();
+    raf = requestAnimationFrame(loop);
 
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
-      controls.dispose();
+      canvas.removeEventListener("pointerdown", onDown);
+      canvas.removeEventListener("pointermove", onMove);
+      canvas.removeEventListener("pointerup", onUp);
+      canvas.removeEventListener("pointercancel", onUp);
+      canvas.removeEventListener("wheel", onWheel);
+      canvas.removeEventListener("contextmenu", onContext);
       disposeGroup(grid);
       disposeGroup(geometry);
       renderer.dispose();
-      renderer.domElement.remove();
+      canvas.remove();
       sceneRef.current = null;
+      controller.setOnChange(() => {});
     };
-  }, []);
+  }, [controller]);
 
   // Rebuild grid and geometry whenever the prepared output changes.
   useEffect(() => {
@@ -440,7 +423,7 @@ export function Viewport3D({
 
     // Refit on a new file or when the drawing moves or rescales noticeably, but keep the
     // user's view while they only tweak settings like curve mode.
-    s.frame = { center, radius };
+    controller.setFrame([center.x, center.y, center.z], radius);
     const prev = lastFit.current;
     const moved =
       !prev ||
@@ -448,17 +431,17 @@ export function Viewport3D({
       Math.abs(prev.radius - radius) / prev.radius > 0.05 ||
       prev.center.distanceTo(center) > prev.radius * 0.05;
     if (moved) {
-      s.fit(!prev || prev.key !== fileKey ? ISO_DIR : undefined);
+      controller.fit({ angles: !prev || prev.key !== fileKey ? ISO_ANGLES : undefined });
       lastFit.current = { key: fileKey, center, radius };
     }
     s.invalidate();
-  }, [prepared, options.output, options.curveMode, options.unit, options.plane, fileKey, showSeams]);
+  }, [prepared, options.output, options.curveMode, options.unit, options.plane, fileKey, showSeams, controller]);
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-[#17191d]">
       <div
         ref={hostRef}
-        className="h-full w-full cursor-grab active:cursor-grabbing data-[no-webgl=true]:flex data-[no-webgl=true]:cursor-default data-[no-webgl=true]:items-center data-[no-webgl=true]:justify-center data-[no-webgl=true]:text-[13px] data-[no-webgl=true]:text-white/60"
+        className="h-full w-full cursor-default data-[no-webgl=true]:flex data-[no-webgl=true]:cursor-default data-[no-webgl=true]:items-center data-[no-webgl=true]:justify-center data-[no-webgl=true]:text-[13px] data-[no-webgl=true]:text-white/60"
       />
       <div
         className="pointer-events-none absolute flex items-end justify-between gap-3 p-3 text-[11px] text-white/55"
@@ -474,6 +457,7 @@ export function Viewport3D({
           <span className="flex items-center gap-1.5">
             <span className="h-0.5 w-3 rounded-full bg-[#3e8ef7]" />Z
           </span>
+          <span className="text-white/75">{snap.name}</span>
           <span>{options.plane.toUpperCase()} plane</span>
           {gridLabel && <span className="tabular-nums">Grid {gridLabel}</span>}
           {!!prepared?.problems.openEnds.length && (
@@ -499,6 +483,7 @@ export function Viewport3D({
         </div>
         <span className="hidden shrink-0 text-right 2xl:block">Drag to orbit · Right-drag to pan · Scroll to zoom</span>
       </div>
+      <NavGizmo controller={controller} style={{ top: insets.top + 4, right: insets.right + 12 }} />
     </div>
   );
 }
