@@ -14,7 +14,7 @@ const VIEWS: { id: View; label: string }[] = [
   { id: "original", label: "Original" },
 ];
 
-const bar = "pointer-events-auto flex h-12 items-center rounded-2xl bg-surface-2/95 shadow-surface-6 backdrop-blur-md";
+const bar = "pointer-events-auto flex h-12 items-center rounded-2xl panel-glass shadow-surface-6";
 
 /**
  * Floating bar across the top: the file (left, above the Source panel), view switching and 3D

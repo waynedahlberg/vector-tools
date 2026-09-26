@@ -138,7 +138,7 @@ export function Panel({
     <aside
       style={style}
       className={cn(
-        "pointer-events-auto absolute flex flex-col overflow-hidden rounded-2xl bg-surface-2/95 shadow-surface-6 backdrop-blur-md",
+        "pointer-events-auto absolute flex flex-col overflow-hidden rounded-2xl panel-glass shadow-surface-6",
         className
       )}
     >

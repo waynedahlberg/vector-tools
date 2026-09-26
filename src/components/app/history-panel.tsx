@@ -63,7 +63,7 @@ export function HistoryDock({
       initial={false}
       animate={{ height: open ? HISTORY_EXPANDED : HISTORY_COLLAPSED }}
       transition={{ type: "spring", stiffness: 300, damping: 30 }}
-      className="pointer-events-auto absolute inset-x-4 bottom-4 flex flex-col overflow-hidden rounded-2xl bg-surface-2/95 shadow-surface-6 backdrop-blur-md"
+      className="pointer-events-auto absolute inset-x-4 bottom-4 flex flex-col overflow-hidden rounded-2xl panel-glass shadow-surface-6"
       aria-label="Conversion history"
     >
       <div className="flex h-12 shrink-0 items-center gap-2 pl-2 pr-2">
