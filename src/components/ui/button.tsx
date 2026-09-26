@@ -266,6 +266,9 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         // asChild roots (e.g. an anchor) don't take the disabled attribute —
         // Slot would spread it onto the element as invalid HTML.
         disabled={asChildElement ? undefined : disabled || loading}
+        // Firefox restores a button's disabled state across reloads, which then disagrees with
+        // the server-rendered HTML and breaks hydration. autocomplete="off" opts out of that.
+        {...(asChildElement ? {} : { autoComplete: "off" })}
         style={style}
         {...props}
       >
