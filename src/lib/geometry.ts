@@ -26,10 +26,27 @@ export type Segment =
   | { kind: "line"; p0: Pt; p1: Pt }
   | { kind: "cubic"; p0: Pt; p1: Pt; p2: Pt; p3: Pt };
 
+/** Where a shape came from and how it was painted, carried through every pipeline stage. */
+export type ShapeMeta = {
+  /** Stable across setting changes: the element's path in the document plus the subpath index. */
+  id: string;
+  /** Key of the top-level group (layer) the shape belongs to. */
+  layer: string;
+  /** Normalised paint: "#rrggbb", "none", or another CSS value such as a gradient reference. */
+  fill: string;
+  stroke: string;
+  /** Stroke width in the shape's current coordinate units. */
+  strokeWidth: number;
+  linecap: "butt" | "round" | "square";
+  linejoin: "miter" | "round" | "bevel";
+  miterLimit: number;
+};
+
 /** A connected run of segments (one SVG subpath). */
 export type PathShape = {
   type: "path";
   name: string;
+  meta: ShapeMeta;
   segments: Segment[];
   closed: boolean;
 };
@@ -38,6 +55,7 @@ export type PathShape = {
 export type EllipseShape = {
   type: "ellipse";
   name: string;
+  meta: ShapeMeta;
   center: Pt;
   axis: Pt; // unit vector of the rx direction
   rx: number;
@@ -46,10 +64,17 @@ export type EllipseShape = {
 
 export type Shape = PathShape | EllipseShape;
 
+/** Uniform scale factor of an affine map (geometric mean of its axis scales). */
+export function matScale(m: Mat): number {
+  return Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2]));
+}
+
 export function transformShape(s: Shape, m: Mat): Shape {
+  const meta = s.meta.strokeWidth ? { ...s.meta, strokeWidth: s.meta.strokeWidth * matScale(m) } : s.meta;
   if (s.type === "path") {
     return {
       ...s,
+      meta,
       segments: s.segments.map((seg) =>
         seg.kind === "line"
           ? { kind: "line", p0: apply(m, seg.p0), p1: apply(m, seg.p1) }
@@ -79,6 +104,7 @@ export function transformShape(s: Shape, m: Mat): Shape {
   return {
     type: "ellipse",
     name: s.name,
+    meta,
     center: apply(m, s.center),
     axis: { x: Math.cos(theta), y: Math.sin(theta) },
     rx: Math.sqrt(Math.max(mean + diff, 0)),

@@ -12,7 +12,8 @@ import {
   type Pt,
   type Shape,
 } from "./geometry";
-import { parseSvg, type ParsedSvg } from "./svg-parser";
+import { parseSvg, type ParsedSvg, type SvgLayer } from "./svg-parser";
+import { memoStage } from "./pipeline";
 import { writeStep, type CurveMode, type OutputUnit, type Region } from "./step-writer";
 
 export type OutputGeometry = "curves" | "faces" | "both";
@@ -60,14 +61,24 @@ export type Prepared = {
   polylines: { pts: Pt[]; closed: boolean }[];
   /** Face outlines and holes for filled previews, matching `regions`. */
   regionPolys: { outer: Pt[]; holes: Pt[][] }[];
+  /** Top-level groups found in the SVG. */
+  layers: SvgLayer[];
 };
 
 const MM_PER_UNIT: Record<OutputUnit, number> = { mm: 1, in: 25.4 };
 
-export function parseMarkup(markup: string, opts: ConvertOptions): ParsedSvg {
+const parseStage = memoStage((markup: string, p: { includeHidden: boolean; exactEllipses: boolean }): ParsedSvg => {
   const doc = new DOMParser().parseFromString(markup, "image/svg+xml");
-  return parseSvg(doc, { includeHidden: opts.includeHidden, exactEllipses: opts.exactEllipses });
-}
+  return parseSvg(doc, p);
+});
+
+/** Scale into output units and flip Y so the drawing reads upright in CAD. */
+const placeStage = memoStage(
+  (parsed: ParsedSvg, p: { k: number; vbx: number; vby: number }): Shape[] => {
+    const m: Mat = [p.k, 0, 0, -p.k, -p.vbx * p.k, p.vby * p.k];
+    return parsed.shapes.map((s) => transformShape(s, m));
+  }
+);
 
 function userUnitToMm(parsed: ParsedSvg, opts: ConvertOptions): { mm: number; note: string } {
   const pxMm = 25.4 / opts.dpi;
@@ -141,13 +152,12 @@ function toPathD(poly: Pt[], closed: boolean): string {
 }
 
 export function prepare(markup: string, opts: ConvertOptions): Prepared {
-  const parsed = parseMarkup(markup, opts);
+  const parsed = parseStage(markup, { includeHidden: opts.includeHidden, exactEllipses: opts.exactEllipses });
   const { mm, note } = userUnitToMm(parsed, opts);
   const vb = parsed.info.viewBox;
   const k = (mm * opts.scale) / MM_PER_UNIT[opts.unit];
-  // viewBox origin → 0, scale to output units, flip Y so the drawing reads upright in CAD.
-  let m: Mat = [k, 0, 0, -k, -(vb?.[0] ?? 0) * k, (vb?.[1] ?? 0) * k];
-  let shapes = parsed.shapes.map((s) => transformShape(s, m));
+  let shapes = placeStage(parsed, { k, vbx: vb?.[0] ?? 0, vby: vb?.[1] ?? 0 });
+  let m: Mat;
 
   const previewTol = 0.0004;
   const measure = (list: Shape[]) => {
@@ -174,6 +184,7 @@ export function prepare(markup: string, opts: ConvertOptions): Prepared {
   const isClosed = (s: Shape) => s.type === "ellipse" || s.closed;
   const closedIdx = shapes.map((s, i) => (isClosed(s) ? i : -1)).filter((i) => i >= 0);
   const { depth, parent } = nesting(closedIdx.map((i) => polys[i]));
+  shapes = shapes.slice(); // the orientation pass below replaces entries in place
 
   // Give closed curves a consistent direction (outer boundaries counter-clockwise, holes
   // clockwise) and keep each seam off sharp corners, which some CAD importers reject.
@@ -214,6 +225,7 @@ export function prepare(markup: string, opts: ConvertOptions): Prepared {
     previewPaths: shapes.map((s, i) => ({ d: toPathD(shown[i], isClosed(s)), closed: isClosed(s) })),
     polylines: shapes.map((s, i) => ({ pts: shown[i], closed: isClosed(s) })),
     regionPolys: regionIdx.map((r) => ({ outer: shown[r.outer], holes: r.holes.map((h) => shown[h]) })),
+    layers: parsed.layers,
   };
 }
 

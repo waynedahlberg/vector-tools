@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowRight, Check, Download, FileCode2, RefreshCw, TriangleAlert, X } from "lucide-react";
+import { ArrowRight, Check, Download, FileCode2, Redo2, RefreshCw, TriangleAlert, Undo2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -10,6 +10,7 @@ import { Dropzone, SvgFileInput, readSvgFile, type LoadedFile } from "./dropzone
 import { Preview } from "./preview";
 import { OptionsPanel } from "./options-panel";
 import { HistoryPanel } from "./history-panel";
+import { useOptionsHistory } from "./use-options-history";
 import dynamic from "next/dynamic";
 import { DEFAULT_OPTIONS, prepare, toStep, type ConvertOptions, type Prepared } from "@/lib/convert";
 import { addHistory, clearHistory, deleteHistory, listHistory, type HistoryEntry } from "@/lib/history";
@@ -36,11 +37,29 @@ function safeFileName(name: string) {
 export function Converter() {
   const [file, setFile] = useState<LoadedFile | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [options, setOptions] = useState<ConvertOptions>(DEFAULT_OPTIONS);
-  const [scaleText, setScaleText] = useState("1");
+  const [result, setResult] = useState<Result | null>(null);
+  // What the user is typing into the scale field; null shows the current setting.
+  const [scaleDraft, setScaleDraft] = useState<string | null>(null);
+  const saveOptions = (next: ConvertOptions) => {
+    setResult(null);
+    try {
+      localStorage.setItem(OPTIONS_KEY, JSON.stringify(next));
+    } catch {}
+  };
+  const {
+    value: options,
+    set: setOptions,
+    replace: replaceOptions,
+    undo: undoOptions,
+    redo: redoOptions,
+    canUndo,
+    canRedo,
+  } = useOptionsHistory<ConvertOptions>(DEFAULT_OPTIONS, (next) => {
+    saveOptions(next);
+    setScaleDraft(null);
+  });
   const [fileName, setFileName] = useState("");
   const [converting, setConverting] = useState(false);
-  const [result, setResult] = useState<Result | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const replaceInputRef = useRef<HTMLInputElement>(null);
@@ -54,18 +73,8 @@ export function Converter() {
       const raw = localStorage.getItem(OPTIONS_KEY);
       if (raw) saved = { ...DEFAULT_OPTIONS, ...JSON.parse(raw) };
     } catch {}
-    if (!saved) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time restore from client storage
-    setOptions(saved);
-    setScaleText(String(saved.scale));
-  }, []);
-
-  const commitOptions = (next: ConvertOptions) => {
-    setOptions(next);
-    try {
-      localStorage.setItem(OPTIONS_KEY, JSON.stringify(next));
-    } catch {}
-  };
+    if (saved) replaceOptions(saved);
+  }, [replaceOptions]);
 
   const refreshHistory = useCallback(
     () =>
@@ -82,19 +91,17 @@ export function Converter() {
     refreshHistory();
   }, [refreshHistory]);
 
+  const scaleText = scaleDraft ?? String(options.scale);
   const scaleValue = Number(scaleText);
   const scaleError =
     scaleText.trim() === "" || !Number.isFinite(scaleValue) || scaleValue <= 0 ? "Enter a number above 0" : undefined;
 
-  const updateOptions = (patch: Partial<ConvertOptions>) => {
-    commitOptions({ ...options, ...patch });
-    setResult(null);
-  };
+  const updateOptions = (patch: Partial<ConvertOptions>) => setOptions({ ...options, ...patch });
 
   const onScaleText = (v: string) => {
-    setScaleText(v);
     const n = Number(v);
     if (v.trim() !== "" && Number.isFinite(n) && n > 0) updateOptions({ scale: n });
+    setScaleDraft(v);
   };
 
   const loadFile = (f: LoadedFile) => {
@@ -160,8 +167,8 @@ export function Converter() {
   const restore = (e: HistoryEntry) => {
     setFile({ name: e.sourceName, svg: e.svg });
     setFileName(e.stepName.replace(/\.step$/i, ""));
-    commitOptions({ ...DEFAULT_OPTIONS, ...e.options });
-    setScaleText(String(e.options.scale));
+    setOptions({ ...DEFAULT_OPTIONS, ...e.options });
+    setScaleDraft(null);
     setResult(null);
     setLoadError(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -285,12 +292,28 @@ export function Converter() {
 
         <aside className="flex flex-col gap-4 lg:sticky lg:top-6 lg:self-start">
           <div className="flex flex-col gap-6 rounded-2xl bg-surface-2 p-5 shadow-surface-2">
+            <div className="-mb-2 -mt-1 flex items-center justify-between gap-2">
+              <h2 className="text-[14px] font-medium text-foreground">Settings</h2>
+              <div className="flex items-center gap-0.5">
+                <Tooltip content="Undo (Ctrl+Z)">
+                  <Button variant="ghost" size="icon-sm" aria-label="Undo" disabled={!canUndo} onClick={undoOptions}>
+                    <Undo2 />
+                  </Button>
+                </Tooltip>
+                <Tooltip content="Redo (Ctrl+Shift+Z)">
+                  <Button variant="ghost" size="icon-sm" aria-label="Redo" disabled={!canRedo} onClick={redoOptions}>
+                    <Redo2 />
+                  </Button>
+                </Tooltip>
+              </div>
+            </div>
             <OptionsPanel
               options={options}
               onChange={updateOptions}
               scaleText={scaleText}
               onScaleText={onScaleText}
               scaleError={scaleError}
+              onScaleBlur={() => setScaleDraft(null)}
               fileName={fileName}
               onFileName={(v) => {
                 setFileName(v);

@@ -1,7 +1,8 @@
 // Parses SVG markup into transformed geometry in root user units.
 // Uses only basic DOM APIs so it runs in the browser (DOMParser) and in Node tests.
 
-import { IDENTITY, multiply, transformShape, type Mat, type Pt, type Segment, type Shape } from "./geometry";
+import { IDENTITY, multiply, transformShape, type Mat, type Pt, type Segment, type Shape, type ShapeMeta } from "./geometry";
+import { normalizePaint } from "./paint";
 
 export type SvgDocumentInfo = {
   /** Root width/height in millimetres when the SVG declares absolute units, else null. */
@@ -12,10 +13,17 @@ export type SvgDocumentInfo = {
   heightAttr: string | null;
 };
 
+export type SvgLayer = { id: string; name: string };
+
+/** Layer key for shapes that aren't inside a top-level group. */
+export const UNGROUPED = "~ungrouped";
+
 export type ParsedSvg = {
   shapes: Shape[];
   info: SvgDocumentInfo;
   warnings: string[];
+  /** Top-level groups that contain geometry, in document order. */
+  layers: SvgLayer[];
 };
 
 export type ParseOptions = {
@@ -56,6 +64,10 @@ function styleValue(el: Element, prop: string): string | null {
   if (!style) return null;
   const m = new RegExp(`(?:^|;)\\s*${prop}\\s*:\\s*([^;]+)`).exec(style);
   return m ? m[1].trim() : null;
+}
+
+function elementChildren(el: Element): Element[] {
+  return Array.from(el.childNodes).filter((n): n is Element => n.nodeType === 1);
 }
 
 function localName(el: Element): string {
@@ -406,23 +418,48 @@ export function parseSvg(doc: Document, opts: ParseOptions): ParsedSvg {
   const indexIds = (el: Element) => {
     const id = el.getAttribute("id");
     if (id) byId.set(id, el);
-    for (const child of Array.from(el.childNodes)) if (child.nodeType === 1) indexIds(child as Element);
+    for (const child of elementChildren(el)) indexIds(child);
   };
   indexIds(root);
 
   const shapes: Shape[] = [];
-  let skippedText = 0, skippedImages = 0, strokeOnly = 0, clipped = 0, unnamed = 0;
+  const layers: SvgLayer[] = [];
+  let skippedText = 0, skippedImages = 0, strokeOnly = 0, clipped = 0, unnamed = 0, groups = 0;
   const GEOMETRY = new Set(["path", "rect", "circle", "ellipse", "line", "polyline", "polygon"]);
 
-  const addPath = (d: string, name: string, m: Mat) => {
-    for (const raw of parsePathData(d)) {
-      const clean = cleanSubpath(raw);
-      if (clean) shapes.push(transformShape({ type: "path", name, ...clean }, m));
-    }
+  type Ctx = {
+    key: string;
+    layer: string;
+    fill: string;
+    stroke: string;
+    strokeWidth: number;
+    linecap: ShapeMeta["linecap"];
+    linejoin: ShapeMeta["linejoin"];
+    miterLimit: number;
   };
 
-  type Paint = { fill: string; stroke: string };
-  const walk = (el: Element, parent: Mat, depth: number, inherited: Paint) => {
+  const metaFor = (ctx: Ctx, sub: number): ShapeMeta => ({
+    id: `${ctx.key}:${sub}`,
+    layer: ctx.layer,
+    fill: ctx.fill,
+    stroke: ctx.stroke,
+    strokeWidth: ctx.stroke === "none" ? 0 : ctx.strokeWidth,
+    linecap: ctx.linecap,
+    linejoin: ctx.linejoin,
+    miterLimit: ctx.miterLimit,
+  });
+
+  const addPath = (d: string, name: string, m: Mat, ctx: Ctx) => {
+    const subpaths = parsePathData(d)
+      .map(cleanSubpath)
+      .filter((c): c is RawSubpath => c !== null);
+    subpaths.forEach((clean, i) => {
+      const label = i > 0 ? `${name}.${i + 1}` : name;
+      shapes.push(transformShape({ type: "path", name: label, meta: metaFor(ctx, i), ...clean }, m));
+    });
+  };
+
+  const walk = (el: Element, parent: Mat, depth: number, inherited: Ctx) => {
     if (depth > 64) return;
     const tag = localName(el);
     if (SKIPPED.has(tag) || el.nodeName.includes("sodipodi")) return;
@@ -433,47 +470,76 @@ export function parseSvg(doc: Document, opts: ParseOptions): ParsedSvg {
     }
     let m = multiply(parent, parseTransform(el.getAttribute("transform")));
     const name = el.getAttribute("id") || `${tag}_${++unnamed}`;
-    const paint: Paint = {
-      fill: styleValue(el, "fill") ?? inherited.fill,
-      stroke: styleValue(el, "stroke") ?? inherited.stroke,
+    const width = parseLength(styleValue(el, "stroke-width"));
+    const cap = styleValue(el, "stroke-linecap");
+    const join = styleValue(el, "stroke-linejoin");
+    const miter = parseFloat(styleValue(el, "stroke-miterlimit") ?? "");
+    const ctx: Ctx = {
+      ...inherited,
+      fill: normalizePaint(styleValue(el, "fill")) ?? inherited.fill,
+      stroke: normalizePaint(styleValue(el, "stroke")) ?? inherited.stroke,
+      strokeWidth: width && width.unit !== "%" ? width.value : inherited.strokeWidth,
+      linecap: cap === "round" || cap === "square" || cap === "butt" ? cap : inherited.linecap,
+      linejoin: join === "round" || join === "bevel" || join === "miter" ? join : inherited.linejoin,
+      miterLimit: Number.isFinite(miter) && miter >= 1 ? miter : inherited.miterLimit,
     };
-    if (el.getAttribute("clip-path") || el.getAttribute("mask") || /(?:^|;)\s*(?:clip-path|mask)\s*:/.test(el.getAttribute("style") || "")) {
+    if (
+      el.getAttribute("clip-path") ||
+      el.getAttribute("mask") ||
+      /(?:^|;)\s*(?:clip-path|mask)\s*:/.test(el.getAttribute("style") || "")
+    ) {
       clipped++;
     }
     // Lines and polylines are usually drawn as strokes, so only flag filled-shape types.
-    if (GEOMETRY.has(tag) && tag !== "line" && tag !== "polyline" && paint.fill === "none" && paint.stroke !== "none") {
+    if (GEOMETRY.has(tag) && tag !== "line" && tag !== "polyline" && ctx.fill === "none" && ctx.stroke !== "none") {
       strokeOnly++;
     }
+
+    const walkChildren = (parentEl: Element, mat: Mat, scope: Ctx) => {
+      elementChildren(parentEl).forEach((child, i) => {
+        const id = child.getAttribute("id");
+        const childCtx: Ctx = { ...scope, key: `${scope.key}/${id ? `#${id}` : `${localName(child)}[${i}]`}` };
+        // Top-level groups are treated as layers (Inkscape and Illustrator export layers this way).
+        if (parentEl === root) {
+          if (localName(child) === "g") {
+            const label = child.getAttribute("inkscape:label") || child.getAttribute("data-name") || id;
+            layers.push({ id: childCtx.key, name: label || `Group ${++groups}` });
+            childCtx.layer = childCtx.key;
+          } else {
+            childCtx.layer = UNGROUPED;
+          }
+        }
+        walk(child, mat, depth + 1, childCtx);
+      });
+    };
 
     switch (tag) {
       case "svg":
         if (el !== root) m = multiply(m, [1, 0, 0, 1, num(el, "x"), num(el, "y")]);
-        for (const child of Array.from(el.childNodes)) if (child.nodeType === 1) walk(child as Element, m, depth + 1, paint);
+        walkChildren(el, m, ctx);
         return;
       case "g":
       case "a":
       case "switch":
-        for (const child of Array.from(el.childNodes)) if (child.nodeType === 1) walk(child as Element, m, depth + 1, paint);
+        walkChildren(el, m, ctx);
         return;
       case "use": {
         const href = el.getAttribute("href") || el.getAttribute("xlink:href") || "";
         const target = href.startsWith("#") ? byId.get(href.slice(1)) : undefined;
         if (!target) return;
         const mm = multiply(m, [1, 0, 0, 1, num(el, "x"), num(el, "y")]);
-        if (localName(target) === "symbol") {
-          for (const child of Array.from(target.childNodes)) if (child.nodeType === 1) walk(child as Element, mm, depth + 1, paint);
-        } else {
-          walk(target, mm, depth + 1, paint);
-        }
+        const useCtx: Ctx = { ...ctx, key: `${ctx.key}>#${href.slice(1)}` };
+        if (localName(target) === "symbol") walkChildren(target, mm, useCtx);
+        else walk(target, mm, depth + 1, useCtx);
         return;
       }
       case "path":
-        addPath(el.getAttribute("d") || "", name, m);
+        addPath(el.getAttribute("d") || "", name, m, ctx);
         return;
       case "rect": {
         const w = num(el, "width"), h = num(el, "height");
         if (w > 0 && h > 0) {
-          addPath(rectPath(num(el, "x"), num(el, "y"), w, h, num(el, "rx", -1), num(el, "ry", -1)), name, m);
+          addPath(rectPath(num(el, "x"), num(el, "y"), w, h, num(el, "rx", -1), num(el, "ry", -1)), name, m, ctx);
         }
         return;
       }
@@ -486,24 +552,36 @@ export function parseSvg(doc: Document, opts: ParseOptions): ParsedSvg {
         if (!(rxF > 0 && ryF > 0)) return;
         if (opts.exactEllipses) {
           shapes.push(
-            transformShape({ type: "ellipse", name, center: { x: cx, y: cy }, axis: { x: 1, y: 0 }, rx: rxF, ry: ryF }, m)
+            transformShape(
+              {
+                type: "ellipse",
+                name,
+                meta: metaFor(ctx, 0),
+                center: { x: cx, y: cy },
+                axis: { x: 1, y: 0 },
+                rx: rxF,
+                ry: ryF,
+              },
+              m
+            )
           );
         } else {
           addPath(
             `M${cx + rxF},${cy}A${rxF},${ryF} 0 0 1 ${cx - rxF},${cy}A${rxF},${ryF} 0 0 1 ${cx + rxF},${cy}Z`,
             name,
-            m
+            m,
+            ctx
           );
         }
         return;
       }
       case "line":
-        addPath(`M${num(el, "x1")},${num(el, "y1")}L${num(el, "x2")},${num(el, "y2")}`, name, m);
+        addPath(`M${num(el, "x1")},${num(el, "y1")}L${num(el, "x2")},${num(el, "y2")}`, name, m, ctx);
         return;
       case "polyline":
       case "polygon": {
         const d = pointsPath(el.getAttribute("points"), tag === "polygon");
-        if (d) addPath(d, name, m);
+        if (d) addPath(d, name, m, ctx);
         return;
       }
       case "text":
@@ -513,18 +591,29 @@ export function parseSvg(doc: Document, opts: ParseOptions): ParsedSvg {
         skippedImages++;
         return;
       default:
-        for (const child of Array.from(el.childNodes)) if (child.nodeType === 1) walk(child as Element, m, depth + 1, paint);
+        walkChildren(el, m, ctx);
     }
   };
 
-  walk(root, IDENTITY, 0, { fill: "black", stroke: "none" });
+  walk(root, IDENTITY, 0, {
+    key: "svg",
+    layer: UNGROUPED,
+    fill: "#000000",
+    stroke: "none",
+    strokeWidth: 1,
+    linecap: "butt",
+    linejoin: "miter",
+    miterLimit: 4,
+  });
 
   if (skippedText) {
-    warnings.push(`Skipped ${skippedText} text element${skippedText > 1 ? "s" : ""}. Convert text to outlines/paths in your editor first.`);
+    warnings.push(
+      `Skipped ${skippedText} text element${skippedText > 1 ? "s" : ""}. Convert text to outlines/paths in your editor first.`
+    );
   }
   if (strokeOnly) {
     warnings.push(
-      `${strokeOnly} shape${strokeOnly > 1 ? "s are" : " is"} stroke-only and will convert as a centerline, not the visible stroke width. Use "Outline stroke" in your editor if you need the thickness.`
+      `${strokeOnly} shape${strokeOnly > 1 ? "s are" : " is"} stroke-only and will convert as a centerline. Turn on "Outline strokes" to export the visible stroke width.`
     );
   }
   if (clipped) {
@@ -533,9 +622,14 @@ export function parseSvg(doc: Document, opts: ParseOptions): ParsedSvg {
     );
   }
   if (skippedImages) {
-    warnings.push(`Skipped ${skippedImages} embedded raster image${skippedImages > 1 ? "s" : ""}. Only vector geometry converts.`);
+    warnings.push(
+      `Skipped ${skippedImages} embedded raster image${skippedImages > 1 ? "s" : ""}. Only vector geometry converts.`
+    );
   }
   if (!shapes.length) warnings.push("No vector geometry was found in this SVG.");
 
-  return { shapes, info, warnings };
+  const usedLayers = new Set(shapes.map((s) => s.meta.layer));
+  const outLayers = layers.filter((l) => usedLayers.has(l.id));
+  if (usedLayers.has(UNGROUPED)) outLayers.push({ id: UNGROUPED, name: "Ungrouped" });
+  return { shapes, info, warnings, layers: outLayers };
 }

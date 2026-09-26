@@ -51,6 +51,7 @@ export function OptionsPanel({
   scaleText,
   onScaleText,
   scaleError,
+  onScaleBlur,
   fileName,
   onFileName,
   sizeLabel,
@@ -61,6 +62,7 @@ export function OptionsPanel({
   scaleText: string;
   onScaleText: (v: string) => void;
   scaleError?: string;
+  onScaleBlur: () => void;
   fileName: string;
   onFileName: (v: string) => void;
   sizeLabel: string | null;
@@ -162,6 +164,7 @@ export function OptionsPanel({
             inputMode="decimal"
             value={scaleText}
             onChange={onScaleText}
+            onBlur={onScaleBlur}
             error={scaleError}
             placeholder="1"
           />
