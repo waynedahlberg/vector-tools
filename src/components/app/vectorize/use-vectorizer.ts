@@ -49,7 +49,7 @@ export async function readImageFile(f: File): Promise<LoadedImage> {
 
 export type TraceStatus = "idle" | "tracing" | "done" | "error";
 
-/** Image → SVG state: the open image, settings with undo, and the latest trace. */
+/** Vectorize state: the open image, settings with undo, and the latest trace. */
 export function useVectorizer(active: boolean) {
   const [image, setImage] = useState<LoadedImage | null>(null);
   const history = useOptionsHistory<VectorizeSettings>(

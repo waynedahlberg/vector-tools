@@ -1,4 +1,4 @@
-// Settings for Image → SVG mode. `TraceOptions` and its string unions are generated from the
+// Settings for Vectorize mode. `TraceOptions` and its string unions are generated from the
 // Rust crate (crates/vectorize/src/types.rs), so the UI and the tracer can't drift apart.
 
 import type { ColorMode, CurveFit, Layering, TraceOptions } from "./wasm/vectorize";

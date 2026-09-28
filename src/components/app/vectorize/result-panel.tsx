@@ -16,7 +16,7 @@ function toggle(list: string[], value: string) {
   return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
 }
 
-/** Right panel in Image → SVG mode: what the trace produced, and where it goes next. */
+/** Right panel in Vectorize mode: what the trace produced, and where it goes next. */
 export function ResultPanel({
   v,
   fileName,
@@ -42,6 +42,7 @@ export function ResultPanel({
       id: "summary",
       title: "Summary",
       summary: d ? `${fmt(d.stats.paths)} paths, ${fmt(d.stats.nodes)} nodes` : undefined,
+      help: "What the trace produced. Paths are closed loops (holes count separately); nodes are the anchor points a vector editor would show.",
       content: d ? (
         <>
           <div className="flex flex-wrap items-center gap-1.5">
@@ -71,6 +72,7 @@ export function ResultPanel({
       id: "colors",
       title: "Colours",
       summary: d ? (hidden.length ? `${hidden.length} hidden` : "All included") : undefined,
+      help: "Each traced colour with its share of the image. Click one to leave it out of the SVG, for example the background before making STEP faces.",
       content: d ? (
         <>
           <div className="flex flex-wrap gap-1.5" role="group" aria-label="Colours to include">
@@ -98,7 +100,6 @@ export function ResultPanel({
               );
             })}
           </div>
-          <Help>Click a colour to leave it out, for example the background before making STEP faces.</Help>
         </>
       ) : (
         <Help>The traced colours appear here.</Help>
@@ -115,7 +116,7 @@ export function ResultPanel({
         Download SVG
       </Button>
       <Button variant="secondary" trailingIcon={ArrowRight} disabled={!ready} onClick={onSendToStep} className="w-full">
-        Continue to SVG → STEP
+        Continue in STEP Convert
       </Button>
       {!v.image && <Help className="text-center">Open an image to get started.</Help>}
     </div>

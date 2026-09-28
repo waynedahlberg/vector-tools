@@ -2,7 +2,7 @@
 name = "vectorize"
 version = "0.1.0"
 edition = "2021"
-description = "Raster-to-vector tracing for svg2step: preprocessing plus VTracer's visioncortex core, compiled to WASM."
+description = "Raster-to-vector tracing for VectorTools: preprocessing plus VTracer's visioncortex core, compiled to WASM."
 license = "MIT"
 publish = false
 

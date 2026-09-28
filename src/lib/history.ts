@@ -14,6 +14,7 @@ export type HistoryEntry = {
   stats: { curves: number; faces: number; width: number; height: number };
 };
 
+// Keeps the project's original name, so existing history survives the rename to VectorTools.
 const DB_NAME = "svg2step";
 const STORE = "history";
 

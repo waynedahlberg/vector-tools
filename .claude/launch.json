@@ -1,0 +1,34 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dev",
+      "runtimeExecutable": "/Users/wayne/.nvm/versions/node/v22.13.1/bin/npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "3107"
+      ],
+      "env": {
+        "PATH": "/Users/wayne/.nvm/versions/node/v22.13.1/bin:/usr/bin:/bin"
+      },
+      "port": 3107
+    },
+    {
+      "name": "prod",
+      "runtimeExecutable": "/Users/wayne/.nvm/versions/node/v22.13.1/bin/npx",
+      "runtimeArgs": [
+        "next",
+        "start",
+        "--port",
+        "3108"
+      ],
+      "env": {
+        "PATH": "/Users/wayne/.nvm/versions/node/v22.13.1/bin:/usr/bin:/bin"
+      },
+      "port": 3108
+    }
+  ]
+}

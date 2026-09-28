@@ -21,7 +21,7 @@ const MIN_ZOOM = 0.02;
 const MAX_ZOOM = 64;
 
 /**
- * The full-window background in Image → SVG mode: the drop zone, or the image and its trace
+ * The full-window background in Vectorize mode: the drop zone, or the image and its trace
  * on a pannable, zoomable canvas. Drawn as live SVG, so edges stay sharp at any zoom.
  */
 export function VectorStage({
@@ -58,7 +58,7 @@ export function VectorStage({
         >
           <FileUp className="size-7 text-white" strokeWidth={1.75} />
           <p className="text-[15px] font-medium text-white">Drop to trace this file</p>
-          <p className="text-[12px] text-white/70">Images replace the current one; SVGs open in SVG → STEP.</p>
+          <p className="text-[12px] text-white/70">Images replace the current one; SVGs open in STEP Convert.</p>
         </div>
       )}
     </div>

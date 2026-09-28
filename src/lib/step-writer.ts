@@ -215,7 +215,7 @@ export function writeStep(input: StepInput): string {
     "ISO-10303-21;",
     "HEADER;",
     "FILE_DESCRIPTION(('2D geometry converted from SVG'),'2;1');",
-    `FILE_NAME(${str(input.fileName)},'${stamp}',(''),(''),'svg2step','svg2step','');`,
+    `FILE_NAME(${str(input.fileName)},'${stamp}',(''),(''),'VectorTools','VectorTools','');`,
     "FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));",
     "ENDSEC;",
     "DATA;",

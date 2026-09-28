@@ -1,6 +1,6 @@
-# SVG to STEP
+# VectorTools
 
-Convert SVG artwork into 2D STEP (AP214) geometry for Plasticity or any CAD tool, and trace raster images (PNG, JPEG, WebP, GIF, BMP, AVIF) into SVG paths first when you don't have vector artwork. Conversion runs entirely in the browser, so files are never uploaded. Conversion history, including the STEP files, is stored in the browser's IndexedDB.
+Two tools in one browser app. **Vectorize** traces raster images (PNG, JPEG, WebP, GIF, BMP, AVIF) into SVG paths. **STEP Convert** turns SVG artwork into 2D STEP (AP214) geometry for Plasticity or any CAD tool. Conversion runs entirely in the browser, so files are never uploaded. Conversion history, including the STEP files, is stored in the browser's IndexedDB.
 
 ## Run locally
 
@@ -37,12 +37,12 @@ The app is a single static page with no server code or environment variables. Im
 
 ## Modes
 
-Switch with the two icons at the top left. Each mode keeps its own file and settings, and dropping a file anywhere opens it in the right mode (SVGs in SVG → STEP, images in Image → SVG).
+Switch with the tabs at the top left. Each mode keeps its own file and settings, and dropping a file anywhere opens it in the right mode (SVGs in STEP Convert, images in Vectorize).
 
-- **SVG → STEP** converts vector artwork to CAD geometry. Everything below the Image → SVG section describes this mode.
-- **Image → SVG** traces a raster image into coloured vector paths. Download the SVG, or **Continue to SVG → STEP** to convert the trace to CAD.
+- **STEP Convert** converts vector artwork to CAD geometry. Everything below the Vectorize section describes this mode.
+- **Vectorize** traces a raster image into coloured vector paths. Download the SVG, or **Continue in STEP Convert** to convert the trace to CAD.
 
-## Image → SVG
+## Vectorize
 
 The left **Trace** panel sets how the image is read; the right **Result** panel shows the paths, nodes and colours produced, with the download and hand-off pinned at the bottom. The canvas pans (drag) and zooms (wheel, around the cursor); double-click fits. **Traced** shows the result, **Outlines** draws the paths over a faded original to judge the fit, and **Original** shows the image.
 
@@ -56,7 +56,7 @@ The left **Trace** panel sets how the image is read; the right **Result** panel 
 | Resolution | Auto enlarges small images to 1024 px and reduces large ones to 2048 px, which gives smoother curves at a bounded cost. Fixed sizes and the original size are also available. |
 | Colours (Result panel) | Click a colour to leave it out of the SVG, typically the background. |
 
-The SVG keeps the image's pixel size as its document size, so at 96 DPI one image pixel is 0.2646 mm in SVG → STEP; set the real size there with **Fit width** or **Fit height**.
+The SVG keeps the image's pixel size as its document size, so at 96 DPI one image pixel is 0.2646 mm in STEP Convert; set the real size there with **Fit width** or **Fit height**.
 
 ### How tracing works, and its limits
 
@@ -65,7 +65,7 @@ Tracing uses the clustering and curve fitting of [VTracer](https://github.com/vi
 1. The file's header is read before decoding, and images over 100 megapixels (or 32,768 px a side, or 50 MB) are refused, so a small file that decodes to a huge bitmap can't exhaust memory. The browser then decodes straight to the working resolution.
 2. Pixels are thresholded for transparency, median-filtered, then quantized. Anti-aliasing pixels on edges are left out of the k-means sample and colours that only blend two others are merged, so edges don't become thin extra shapes.
 3. VTracer clusters the colours hierarchically and fits curves. Layer colours are snapped back to the palette, so they're exact.
-4. Simplify refits the result with the same curve fitter as SVG → STEP's curve cleanup.
+4. Simplify refits the result with the same curve fitter as STEP Convert's curve cleanup.
 
 Tracing suits logos, icons, flat illustrations and line art. Photos work but become many paths, like posterised art.
 
@@ -122,7 +122,7 @@ The conversion is a chain of memoised stages in `src/lib/convert.ts`: parse → 
 - `src/lib/step-writer.ts`: ISO 10303-21 writer
 - `src/lib/history.ts`: IndexedDB history
 
-Image → SVG:
+Vectorize:
 
 - `crates/vectorize`: the Rust tracer (preprocessing in `preprocess.rs`, VTracer clustering and path output in `trace.rs`, the typed boundary in `types.rs`)
 - `src/lib/vectorize/worker.ts`, `client.ts`, `protocol.ts`: the worker, its lifecycle (cancel, timeout, recycling) and messages

@@ -162,7 +162,7 @@ describe("tracing", () => {
     expect(traceStats([rect]).nodes).toBe(4);
   });
 
-  it("hands off to SVG → STEP as closed faces", () => {
+  it("hands off to STEP Convert as closed faces", () => {
     const settings = { ...DEFAULT_VECTORIZE, hiddenColors: ["#ffffff"] };
     const r = trace(sample(), 96, 96, traceOptions(settings));
     expect(visibleLayers(r, settings.hiddenColors).every((l) => hex(l.color) !== "#ffffff")).toBe(true);

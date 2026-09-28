@@ -1,24 +1,23 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Box, FileCode2, FolderOpen, ImageUpscale, Maximize, Redo2, RotateCcw, Spline, Square, Undo2, Waypoints, X } from "lucide-react";
+import { Box, FileCode2, FolderOpen, ImageUpscale, Maximize, Redo2, RotateCcw, Spline, Square, Undo2, Waypoints } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { TabsSubtle, TabsSubtleItem } from "@/components/ui/tabs-subtle";
-import { cn } from "@/lib/utils";
 import { AppearanceToggle } from "./appearance-toggle";
 
 export type Mode = "svg" | "vectorize";
 
 export const MODES: { id: Mode; title: string; short: string; icon: typeof FileCode2; empty: string }[] = [
-  { id: "svg", title: "SVG to STEP", short: "SVG → STEP", icon: FileCode2, empty: "Convert SVG artwork to CAD" },
-  { id: "vectorize", title: "Image to SVG", short: "Image → SVG", icon: ImageUpscale, empty: "Trace images into vector paths" },
+  { id: "svg", title: "STEP Convert", short: "STEP Convert", icon: FileCode2, empty: "Convert SVG artwork to STEP for CAD" },
+  { id: "vectorize", title: "Vectorize", short: "Vectorize", icon: ImageUpscale, empty: "Trace images into SVG vector paths" },
 ];
 
 const bar = "pointer-events-auto flex h-12 items-center rounded-2xl panel-glass shadow-surface-6";
 
 /**
- * Floating bar across the top: the mode and file (left, above the left panel), view switching
+ * Floating bar across the top: the mode switch and Open (left, above the left panel), view switching
  * and view tools (centre), and undo/redo/reset (right, above the right panel). What each part
  * shows depends on the mode; the parent supplies it.
  */
@@ -27,7 +26,6 @@ export function TopBar<V extends string>({
   onMode,
   file,
   onOpen,
-  onClose,
   views,
   view,
   onView,
@@ -40,9 +38,9 @@ export function TopBar<V extends string>({
 }: {
   mode: Mode;
   onMode: (m: Mode) => void;
-  file: { name: string; detail: string } | null;
+  /** Whether a file is open; its name and Close live in the left panel's header. */
+  file: boolean;
   onOpen: () => void;
-  onClose: () => void;
   views: { id: V; label: string }[];
   view: V;
   onView: (v: V) => void;
@@ -54,77 +52,27 @@ export function TopBar<V extends string>({
   onRedo: () => void;
   reset: { label: string; tooltip: string; disabled: boolean; onClick: () => void };
 }) {
-  const current = MODES.find((m) => m.id === mode)!;
   const noun = mode === "svg" ? "an SVG" : "an image";
 
   return (
     <div className="pointer-events-none absolute inset-x-4 top-4 flex items-start justify-between gap-4">
-      <div className={`${bar} w-[320px] shrink-0 gap-2.5 pl-1.5 pr-1.5`}>
-        <div
-          role="radiogroup"
+      <div className={`${bar} w-[320px] shrink-0 gap-1 pl-1.5 pr-1.5`}>
+        <TabsSubtle
           aria-label="Mode"
-          className="flex shrink-0 items-center gap-0.5 rounded-xl bg-surface-1 p-0.5 shadow-surface-1"
-          onKeyDown={(e) => {
-            if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return;
-            e.preventDefault();
-            const i = MODES.findIndex((m) => m.id === mode);
-            const next = MODES[(i + (e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 1) + MODES.length) % MODES.length];
-            onMode(next.id);
-            e.currentTarget.querySelector<HTMLButtonElement>(`[data-mode="${next.id}"]`)?.focus();
-          }}
+          className="min-w-0 flex-1 justify-start"
+          selectedIndex={MODES.findIndex((m) => m.id === mode)}
+          onSelect={(i) => onMode(MODES[i].id)}
+          idPrefix="mode"
         >
-          {MODES.map((m) => {
-            const selected = m.id === mode;
-            return (
-              <Tooltip key={m.id} content={m.title}>
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  tabIndex={selected ? 0 : -1}
-                  data-mode={m.id}
-                  aria-label={m.title}
-                  onClick={() => onMode(m.id)}
-                  className={cn(
-                    "flex size-7 items-center justify-center rounded-lg outline-none transition-colors focus-visible:ring-2 focus-visible:ring-focus-ring",
-                    selected ? "bg-foreground text-background" : "text-muted-foreground hover:bg-hover hover:text-foreground"
-                  )}
-                >
-                  <m.icon className="size-3.5" strokeWidth={2} />
-                </button>
-              </Tooltip>
-            );
-          })}
-        </div>
-        <div className="flex min-w-0 flex-1 flex-col leading-tight">
-          {file ? (
-            <>
-              <span className="truncate text-[13px] font-medium text-foreground" title={file.name}>
-                {file.name}
-              </span>
-              <span className="truncate text-[11px] text-muted-foreground">
-                {current.short} · {file.detail}
-              </span>
-            </>
-          ) : (
-            <>
-              <span className="text-[13px] font-semibold text-foreground">{current.title}</span>
-              <span className="truncate text-[11px] text-muted-foreground">{current.empty}</span>
-            </>
-          )}
-        </div>
+          {MODES.map((m, i) => (
+            <TabsSubtleItem key={m.id} index={i} icon={m.icon} label={m.short} title={m.empty} />
+          ))}
+        </TabsSubtle>
         <Tooltip content={`Open ${noun} (Ctrl+O), or drop one anywhere`}>
-          <Button variant={file ? "ghost" : "secondary"} size="sm" leadingIcon={FolderOpen} onClick={onOpen}>
-            {file ? "Open" : "Open file"}
+          <Button variant={file ? "ghost" : "secondary"} size="icon-sm" aria-label={`Open ${noun}`} onClick={onOpen}>
+            <FolderOpen />
           </Button>
         </Tooltip>
-        {file && (
-          <Tooltip content="Close file">
-            <Button variant="ghost" size="icon-sm" aria-label="Close file" onClick={onClose}>
-              <X />
-            </Button>
-          </Tooltip>
-        )}
       </div>
 
       {file && (
@@ -165,7 +113,7 @@ export function TopBar<V extends string>({
   );
 }
 
-/** 3D view toggles and camera buttons for SVG → STEP's 3D view. */
+/** 3D view toggles and camera buttons for STEP Convert's 3D view. */
 export function ViewTools3D({
   showNodes,
   onToggleNodes,

@@ -14,13 +14,13 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SVG to STEP",
-  description: "Convert SVG artwork into 2D STEP curves and faces for Plasticity and other CAD tools.",
+  title: "VectorTools",
+  description: "Trace images into vector paths and convert SVG artwork into 2D STEP curves and faces for Plasticity and other CAD tools.",
 };
 
 // Apply the saved appearance before first paint. "system" follows the OS.
 const themeScript = `(() => {
-  const KEY = "svg2step:appearance";
+  const KEY = "svg2step:appearance"; // storage keys keep the original name so saved settings survive
   const m = window.matchMedia("(prefers-color-scheme: dark)");
   const mode = () => {
     try {

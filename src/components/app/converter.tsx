@@ -19,6 +19,7 @@ import { TracePanel } from "./vectorize/trace-panel";
 import { ResultPanel } from "./vectorize/result-panel";
 import { VectorStage, type VectorView } from "./vectorize/vector-stage";
 
+// Storage keys keep the project's original name, so saved settings survive the rename.
 const OPTIONS_KEY = "svg2step:options";
 const VIEW_KEY = "svg2step:view";
 const NODES_KEY = "svg2step:nodes";
@@ -119,7 +120,7 @@ export function Converter() {
         </div>
         <h1 className="text-[17px] font-semibold text-foreground">This application is best on desktop</h1>
         <p className="max-w-[320px] text-[14px] text-muted-foreground">
-          SVG to STEP needs a larger screen for its 3D preview and settings. Open it on a desktop or laptop browser.
+          VectorTools needs a larger screen for its previews and settings. Open it on a desktop or laptop browser.
         </p>
       </div>
     </>
@@ -218,7 +219,7 @@ function Workspace() {
     if (svg) downloadText(svg, `${safeFileName(svgName || "traced").replace(/\.svg$/i, "")}.svg`, "image/svg+xml");
   };
 
-  // The trace becomes the SVG → STEP file, as if it had been opened there.
+  // The trace becomes the STEP Convert file, as if it had been opened there.
   const sendToStep = () => {
     const svg = vec.derived?.svg();
     if (!svg) return;
@@ -303,7 +304,7 @@ function Workspace() {
 
   // Files dropped anywhere in the window open, and dragging shows the stage's drop overlay.
   // Without this, a file dropped outside the drop zone would make the browser navigate to it.
-  // SVGs open in SVG → STEP and images in Image → SVG, switching mode if needed.
+  // SVGs open in STEP Convert and images in Vectorize, switching mode if needed.
   const openDropped = async (f: File) => {
     const report = mode === "vectorize" ? setImageError : setLoadError;
     try {
@@ -371,7 +372,7 @@ function Workspace() {
 
   const vectorizing = mode === "vectorize";
   const panelTop = EDGE + TOP_BAR + GAP;
-  // Image → SVG has no conversion history, so its panels run to the bottom edge.
+  // Vectorize has no conversion history, so its panels run to the bottom edge.
   const panelBottom = vectorizing ? EDGE : EDGE + (historyOpen ? HISTORY_EXPANDED : HISTORY_COLLAPSED) + GAP;
   const insets: Insets = useMemo(
     () => ({ top: panelTop, bottom: panelBottom, left: EDGE + LEFT_W + EDGE, right: EDGE + RIGHT_W + EDGE }),
@@ -402,8 +403,7 @@ function Workspace() {
           <VectorStage v={vec} view={vectorView} insets={insets} dragging={dragging} onImage={loadImage} onError={setImageError} />
           <TopBar
             {...common}
-            file={vec.image && { name: vec.image.name, detail: formatBytes(vec.image.bytes) }}
-            onClose={vec.closeImage}
+            file={!!vec.image}
             views={VECTOR_VIEWS}
             view={vectorView}
             onView={chooseVectorView}
@@ -418,7 +418,12 @@ function Workspace() {
               onClick: () => vec.update({ ...DEFAULT_VECTORIZE, hiddenColors: [] }),
             }}
           />
-          <TracePanel v={vec} loadError={imageError} style={panelStyle} />
+          <TracePanel
+            v={vec}
+            loadError={imageError}
+            file={vec.image && { name: vec.image.name, detail: formatBytes(vec.image.bytes), onClose: vec.closeImage }}
+            style={panelStyle}
+          />
           <ResultPanel
             v={vec}
             fileName={svgName}
@@ -445,8 +450,7 @@ function Workspace() {
           />
           <TopBar
             {...common}
-            file={file && { name: file.name, detail: `${formatBytes(new Blob([file.svg]).size)} SVG` }}
-            onClose={closeFile}
+            file={!!file}
             views={SVG_VIEWS}
             view={view}
             onView={chooseView}
@@ -481,6 +485,7 @@ function Workspace() {
             prepared={prepared}
             errors={errors}
             hasFile={!!file}
+            file={file && { name: file.name, detail: formatBytes(new Blob([file.svg]).size), onClose: closeFile }}
             style={panelStyle}
           />
           <OutputPanel

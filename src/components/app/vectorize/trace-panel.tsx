@@ -14,7 +14,7 @@ import {
   type Resolution,
   type VectorizeSettings,
 } from "@/lib/vectorize/settings";
-import { Help, Panel, Reveal, Sections, StepSlider, type SectionDef } from "../panel-kit";
+import { HelpList, Panel, Reveal, Sections, StepSlider, type SectionDef } from "../panel-kit";
 import type { Vectorizer } from "./use-vectorizer";
 
 const PRESET_IDS = Object.keys(PRESETS) as PresetId[];
@@ -22,11 +22,6 @@ const PALETTE_STEPS = [0, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 32, 48, 64];
 const DENOISE_LABEL = ["Off", "Light", "Medium", "Strong"];
 const SPECK_PX = [0, 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64];
 const FITS: CurveFit[] = ["spline", "polygon", "pixel"];
-const FIT_HELP: Record<CurveFit, string> = {
-  spline: "Smooth Bézier curves, the usual choice.",
-  polygon: "Straight segments only.",
-  pixel: "Follows pixel edges exactly, for pixel art.",
-};
 const RESOLUTION_LABEL: Record<Resolution, string> = {
   auto: "Auto (1024–2048 px)",
   "1024": "1024 px",
@@ -35,8 +30,18 @@ const RESOLUTION_LABEL: Record<Resolution, string> = {
   original: "Original size",
 };
 
-/** Left panel in Image → SVG mode: how the image is read and traced. */
-export function TracePanel({ v, loadError, style }: { v: Vectorizer; loadError: string | null; style: React.CSSProperties }) {
+/** Left panel in Vectorize mode: how the image is read and traced. */
+export function TracePanel({
+  v,
+  loadError,
+  file,
+  style,
+}: {
+  v: Vectorizer;
+  loadError: string | null;
+  file: { name: string; detail: string; onClose: () => void } | null;
+  style: React.CSSProperties;
+}) {
   const s = v.settings;
   const on = (patch: Partial<VectorizeSettings>) => v.update(patch);
   const preset = matchPreset(s);
@@ -49,6 +54,14 @@ export function TracePanel({ v, loadError, style }: { v: Vectorizer; loadError: 
       id: "preset",
       title: "Preset",
       summary: preset ? PRESETS[preset].label : "Custom",
+      help: (
+        <HelpList
+          items={[
+            ...PRESET_IDS.map((id): [string, string] => [PRESETS[id].label, PRESETS[id].help]),
+            ["Custom", "Shown once you change a setting. Pick a preset to start over from it."],
+          ]}
+        />
+      ),
       content: (
         <>
           <TabsSubtle
@@ -60,7 +73,6 @@ export function TracePanel({ v, loadError, style }: { v: Vectorizer; loadError: 
               <TabsSubtleItem key={id} index={i} label={PRESETS[id].label} />
             ))}
           </TabsSubtle>
-          <Help>{preset ? PRESETS[preset].help : "Custom settings. Pick a preset to start over from it."}</Help>
         </>
       ),
     },
@@ -68,6 +80,15 @@ export function TracePanel({ v, loadError, style }: { v: Vectorizer; loadError: 
       id: "colors",
       title: "Colours",
       summary: color ? (s.paletteSize ? `${s.paletteSize} colours` : "Automatic") : "Black & white",
+      help: (
+        <HelpList
+          items={[
+            ["Colours", "Reduces the image to this many colours first (perceptual k-means), which gives cleaner regions. Anti-aliased edges don't use up a colour."],
+            ["Auto", "Groups colours by similarity instead. Lower colour precision and a higher gradient step merge more shades."],
+            ["Black & white", "Pixels darker than the threshold become one ink colour. Trace light areas to invert."],
+          ]}
+        />
+      ),
       content: (
         <>
           <TabsSubtle
@@ -87,11 +108,6 @@ export function TracePanel({ v, loadError, style }: { v: Vectorizer; loadError: 
                 onChange={(paletteSize) => on({ paletteSize })}
                 format={(n) => (n === 0 ? "Auto" : String(n))}
               />
-              <Help>
-                {s.paletteSize
-                  ? "The image is reduced to this many colours first (perceptual k-means), which gives cleaner regions."
-                  : "Colours are grouped by similarity instead of a fixed count. Tune it below."}
-              </Help>
               <Reveal show={!s.paletteSize}>
                 <div className="flex flex-col gap-3">
                   <Slider
@@ -112,7 +128,6 @@ export function TracePanel({ v, loadError, style }: { v: Vectorizer; loadError: 
                     step={1}
                     formatValue={(n) => `${n}`}
                   />
-                  <Help>Higher gradient steps merge shades of a gradient into fewer layers.</Help>
                 </div>
               </Reveal>
             </div>
@@ -129,7 +144,6 @@ export function TracePanel({ v, loadError, style }: { v: Vectorizer; loadError: 
                 formatValue={(n) => `${Math.round(((n as number) / 255) * 100)}%`}
               />
               <Switch label="Trace light areas" checked={s.invert} onToggle={() => on({ invert: !s.invert })} />
-              <Help>Pixels darker than the threshold are traced as one ink colour.</Help>
             </div>
           </Reveal>
         </>
@@ -139,6 +153,15 @@ export function TracePanel({ v, loadError, style }: { v: Vectorizer; loadError: 
       id: "cleanup",
       title: "Clean up",
       summary: `Denoise ${DENOISE_LABEL[s.denoise].toLowerCase()}, specks ${s.filterSpeckle ? `< ${s.filterSpeckle} px` : "kept"}`,
+      help: (
+        <HelpList
+          items={[
+            ["Denoise", "Smooths JPEG noise and soft edges before tracing."],
+            ["Remove specks", "Drops patches smaller than this, measured in traced pixels."],
+            ["Transparent below", "Pixels less opaque than this are treated as empty and never traced."],
+          ]}
+        />
+      ),
       content: (
         <>
           <StepSlider
@@ -164,7 +187,6 @@ export function TracePanel({ v, loadError, style }: { v: Vectorizer; loadError: 
             step={1}
             formatValue={(n) => `${Math.round(((n as number) / 255) * 100)}% opacity`}
           />
-          <Help>Denoising smooths JPEG noise and soft edges. Specks are measured in traced pixels.</Help>
         </>
       ),
     },
@@ -174,6 +196,17 @@ export function TracePanel({ v, loadError, style }: { v: Vectorizer; loadError: 
       summary: `${{ spline: "Smooth", polygon: "Polygon", pixel: "Pixels" }[s.curveFit]}${
         s.curveFit !== "pixel" && s.simplify ? `, simplify ${s.simplify}` : ""
       }`,
+      help: (
+        <HelpList
+          items={[
+            ["Smooth", "Bézier curves, the usual choice."],
+            ["Polygon", "Straight segments only."],
+            ["Pixels", "Follows pixel edges exactly, for pixel art."],
+            ["Corners and segments", "Turns sharper than the corner angle stay corners; shorter segments merge while fitting."],
+            ["Simplify", "Refits the result with fewer nodes: straight edges become single lines and slightly rounded corners become sharp."],
+          ]}
+        />
+      ),
       content: (
         <>
           <TabsSubtle selectedIndex={FITS.indexOf(s.curveFit)} onSelect={(i) => on({ curveFit: FITS[i] })} idPrefix="trace-fit">
@@ -181,7 +214,6 @@ export function TracePanel({ v, loadError, style }: { v: Vectorizer; loadError: 
             <TabsSubtleItem index={1} label="Polygon" />
             <TabsSubtleItem index={2} label="Pixels" />
           </TabsSubtle>
-          <Help>{FIT_HELP[s.curveFit]}</Help>
           <Reveal show={s.curveFit !== "pixel"}>
             <div className="flex flex-col gap-3">
               <Slider
@@ -220,7 +252,6 @@ export function TracePanel({ v, loadError, style }: { v: Vectorizer; loadError: 
                   <span className="text-[13px] font-medium tabular-nums text-foreground">
                     {v.outcome.rawNodes.toLocaleString()} → {(v.derived?.stats.nodes ?? 0).toLocaleString()} nodes
                   </span>
-                  <span className="text-[12px] text-muted-foreground">Refitted with fewer curves; corners are kept.</span>
                 </div>
               )}
             </div>
@@ -243,17 +274,20 @@ export function TracePanel({ v, loadError, style }: { v: Vectorizer; loadError: 
       id: "layering",
       title: "Layering",
       summary: s.layering === "cutout" ? "Cut out" : "Stacked",
+      help: (
+        <HelpList
+          items={[
+            ["Cut out", "Each colour region has the ones above it removed, so shapes never overlap. Best for STEP faces and cutting."],
+            ["Stacked", "Shapes sit on top of each other like paper cut-outs. Fewer paths, but they overlap."],
+          ]}
+        />
+      ),
       content: (
         <>
           <RadioGroup value={s.layering} onValueChange={(layering) => on({ layering: layering as VectorizeSettings["layering"] })}>
             <RadioItem index={0} value="cutout" label="Cut out (no overlaps)" />
             <RadioItem index={1} value="stacked" label="Stacked" />
           </RadioGroup>
-          <Help>
-            {s.layering === "cutout"
-              ? "Each colour region has the ones above it removed, so shapes never overlap. Best for STEP faces and cutting."
-              : "Shapes are layered on top of each other, like paper cut-outs. Fewer paths, but they overlap."}
-          </Help>
         </>
       ),
     },
@@ -261,6 +295,7 @@ export function TracePanel({ v, loadError, style }: { v: Vectorizer; loadError: 
       id: "resolution",
       title: "Resolution",
       summary: traced ? `${traced.width} × ${traced.height} px` : RESOLUTION_LABEL[s.resolution],
+      help: "The size the image is traced at. Small images are enlarged first, which gives smoother curves; larger sizes trace more slowly.",
       content: (
         <>
           <Select value={s.resolution} onValueChange={(r) => on({ resolution: r as Resolution })}>
@@ -286,14 +321,13 @@ export function TracePanel({ v, loadError, style }: { v: Vectorizer; loadError: 
               </span>
             </div>
           )}
-          <Help>Small images are enlarged before tracing, which gives smoother curves. Larger sizes trace slower.</Help>
         </>
       ),
     },
   ];
 
   return (
-    <Panel title="Trace" subtitle="How the image is read" className="left-4 w-[320px]" style={style}>
+    <Panel title="Trace" subtitle="How the image is read" file={file} className="left-4 w-[320px]" style={style}>
       {[loadError, v.error].filter(Boolean).map((msg) => (
         <p key={msg} role="alert" className="mx-2 mb-2 rounded-lg bg-[#ef4444]/10 px-3 py-2 text-[12px] leading-relaxed text-[#dc2626]">
           {msg}

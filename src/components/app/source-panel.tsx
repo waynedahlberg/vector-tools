@@ -8,6 +8,7 @@ import {
   CORNER_STEPS,
   GAP_STEPS,
   Help,
+  HelpList,
   Panel,
   Reveal,
   SPECK_STEPS,
@@ -26,6 +27,7 @@ export function SourcePanel({
   prepared,
   errors,
   hasFile,
+  file,
   style,
 }: {
   options: ConvertOptions;
@@ -33,6 +35,7 @@ export function SourcePanel({
   prepared: Prepared | null;
   errors: string[];
   hasFile: boolean;
+  file: { name: string; detail: string; onClose: () => void } | null;
   style: React.CSSProperties;
 }) {
   const unit = options.unit;
@@ -60,6 +63,7 @@ export function SourcePanel({
       id: "checks",
       title: "Checks",
       summary: issues ? `${issues} to review` : hasFile ? "All clear" : undefined,
+      help: "What the SVG contains, and anything worth fixing before export: self-intersecting curves, open ends that nearly meet, duplicates and stroke-only shapes. Most have a one-click fix.",
       content: (
         <>
           {prepared ? (
@@ -82,7 +86,7 @@ export function SourcePanel({
               )}
             </div>
           ) : (
-            !errors.length && <Help>Open an SVG to see what it contains and anything worth fixing.</Help>
+            !errors.length && <Help>Open an SVG to check it.</Help>
           )}
           <ProblemsList prepared={prepared} options={options} errors={errors} onFix={onChange} />
           {prepared && !issues && <Help>No problems found.</Help>}
@@ -98,6 +102,7 @@ export function SourcePanel({
               options.hiddenLayers.length || options.hiddenColors.length
                 ? `${options.hiddenLayers.length + options.hiddenColors.length} hidden`
                 : "All included",
+            help: "Top-level groups (Inkscape or Illustrator layers) and fill or stroke colours. Untick a layer or click a colour to leave it out of the STEP file.",
             content: <SelectionSection catalog={prepared!} options={options} onChange={onChange} />,
           },
         ]
@@ -106,6 +111,15 @@ export function SourcePanel({
       id: "repair",
       title: "Repair",
       summary: repairOn.length ? repairOn.join(", ") : "Off",
+      help: (
+        <HelpList
+          items={[
+            ["Close gaps", "Joins open path ends closer than the tolerance, and closes paths that nearly meet themselves."],
+            ["Remove duplicate curves", "Drops exact copies, whatever their direction or start point."],
+            ["Remove specks", "Drops shapes smaller than the size."],
+          ]}
+        />
+      ),
       content: (
         <>
           <Switch label="Close gaps" checked={options.closeGaps} onToggle={() => onChange({ closeGaps: !options.closeGaps })} />
@@ -117,7 +131,6 @@ export function SourcePanel({
               onChange={(gapTolerance) => onChange({ gapTolerance })}
               format={withUnit}
             />
-            <Help className="pt-2">Joins open path ends closer than this, and closes paths that nearly meet themselves.</Help>
           </Reveal>
           <Switch
             label="Remove duplicate curves"
@@ -138,20 +151,24 @@ export function SourcePanel({
       id: "shape",
       title: "Shape",
       summary: shapeOn.length ? shapeOn.join(", ") : "Off",
+      help: (
+        <HelpList
+          items={[
+            ["Outline strokes", "Turns stroke-only shapes into closed outlines at their visible width, respecting caps and joins."],
+            [
+              "Curve cleanup",
+              "Refits curves with fewer nodes within a tolerance set by the strength. Straight lines, corners and exact circles are kept. The original shows as a ghost in the 3D view; turn this off to go back to it exactly.",
+            ],
+          ]}
+        />
+      ),
       content: (
         <>
           <Switch
-            label="Outline strokes"
+            label={hasFile ? `Outline strokes (${strokeOnly})` : "Outline strokes"}
             checked={options.outlineStrokes}
             onToggle={() => onChange({ outlineStrokes: !options.outlineStrokes })}
           />
-          <Help className="-mt-1">
-            {strokeOnly
-              ? `Turns ${strokeOnly} stroke-only shape${strokeOnly === 1 ? "" : "s"} into closed outlines at their visible width.`
-              : hasFile
-                ? "Turns stroke-only shapes into closed outlines at their visible width. This file has none."
-                : "Turns stroke-only shapes into closed outlines at their visible width."}
-          </Help>
           <Switch label="Curve cleanup" checked={options.cleanup} onToggle={() => onChange({ cleanup: !options.cleanup })} />
           <Reveal show={options.cleanup}>
             <div className="flex flex-col gap-3">
@@ -182,10 +199,6 @@ export function SourcePanel({
                   </span>
                 </div>
               )}
-              <Help>
-                Refits curves with fewer nodes. Straight lines, corners and exact circles are kept. The original shows as a
-                ghost in the 3D view; turn this off to go back to it exactly.
-              </Help>
             </div>
           </Reveal>
         </>
@@ -194,7 +207,7 @@ export function SourcePanel({
   ];
 
   return (
-    <Panel title="Source" subtitle="What's read from your SVG" className="left-4 w-[320px]" style={style}>
+    <Panel title="Source" subtitle="What's read from your SVG" file={file} className="left-4 w-[320px]" style={style}>
       <Sections sections={sections} defaultOpen={["checks", "selection", "repair", "shape"]} />
     </Panel>
   );

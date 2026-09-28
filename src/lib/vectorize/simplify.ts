@@ -1,6 +1,6 @@
 // Node reduction for traced paths. VTracer fits many short curves, especially on enlarged
 // images; this refits each smooth run with as few cubics as fit within a tolerance, using the
-// same curve cleanup as SVG → STEP. Corners stay corners. Pixel-mode traces are left alone.
+// same curve cleanup as STEP Convert. Corners stay corners. Pixel-mode traces are left alone.
 
 import { cleanupCurves } from "../cleanup";
 import type { PathShape, Pt, Segment } from "../geometry";

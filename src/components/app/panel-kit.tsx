@@ -9,6 +9,9 @@ import { AccordionContent, AccordionGroup, AccordionItem, AccordionTrigger } fro
 import { Slider } from "@/components/ui/slider";
 import { InputGroup, InputField } from "@/components/ui/input-group";
 import type { ConvertOptions } from "@/lib/convert";
+import { CircleHelp, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 export type Unit = ConvertOptions["unit"];
@@ -122,6 +125,7 @@ export function Help({ children, className }: { children: ReactNode; className?:
 export function Panel({
   title,
   subtitle,
+  file,
   footer,
   className,
   style,
@@ -129,6 +133,8 @@ export function Panel({
 }: {
   title: string;
   subtitle?: string;
+  /** The open file, shown in place of the subtitle with a button to close it. */
+  file?: { name: string; detail: string; onClose: () => void } | null;
   footer?: ReactNode;
   className?: string;
   style?: React.CSSProperties;
@@ -142,17 +148,75 @@ export function Panel({
         className
       )}
     >
-      <header className="flex shrink-0 items-baseline justify-between gap-2 px-4 pb-2 pt-3.5">
-        <h2 className="text-[13px] font-semibold text-foreground">{title}</h2>
-        {subtitle && <span className="truncate text-[12px] text-muted-foreground">{subtitle}</span>}
-      </header>
+      {file ? (
+        <header className="flex shrink-0 items-center gap-2 pb-1.5 pl-4 pr-2 pt-2.5">
+          <h2 className="shrink-0 text-[13px] font-semibold text-foreground">{title}</h2>
+          <span className="min-w-0 flex-1 truncate text-right text-[12px] text-muted-foreground" title={file.name}>
+            <span className="text-foreground">{file.name}</span> · {file.detail}
+          </span>
+          <Tooltip content="Close file">
+            <Button variant="ghost" size="icon-sm" aria-label={`Close ${file.name}`} onClick={file.onClose}>
+              <X />
+            </Button>
+          </Tooltip>
+        </header>
+      ) : (
+        <header className="flex shrink-0 items-baseline justify-between gap-2 px-4 pb-2 pt-3.5">
+          <h2 className="text-[13px] font-semibold text-foreground">{title}</h2>
+          {subtitle && <span className="truncate text-[12px] text-muted-foreground">{subtitle}</span>}
+        </header>
+      )}
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">{children}</div>
       {footer && <footer className="shrink-0 border-t border-border/70 p-4">{footer}</footer>}
     </aside>
   );
 }
 
-export type SectionDef = { id: string; title: string; summary?: ReactNode; content: ReactNode };
+/**
+ * A circled "?" that explains a section on hover or keyboard focus, so the explanation doesn't
+ * take up room in the panel. Fluid Functionalism's Button and Tooltip (rich content, spring
+ * enter and exit), styled as a quiet card for a few lines of text.
+ */
+export function HelpHint({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <Tooltip
+      side="bottom"
+      delayDuration={300}
+      content={children}
+      className={cn(
+        "max-w-[272px] bg-surface-2 px-3 py-2.5 text-[12px] leading-relaxed text-muted-foreground shadow-surface-6",
+        "[text-box:normal] supports-[text-box:trim-both]:py-2.5"
+      )}
+    >
+      <Button variant="ghost" size="icon-sm" aria-label={`About ${label}`}>
+        <CircleHelp />
+      </Button>
+    </Tooltip>
+  );
+}
+
+/** Several short explanations in one hint, one per option. */
+export function HelpList({ items }: { items: [string, ReactNode][] }) {
+  return (
+    <dl className="flex flex-col gap-1.5">
+      {items.map(([term, text]) => (
+        <div key={term}>
+          <dt className="inline font-medium text-foreground">{term}: </dt>
+          <dd className="inline">{text}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+export type SectionDef = {
+  id: string;
+  title: string;
+  summary?: ReactNode;
+  /** What the section's settings do, shown from a "?" beside the title. */
+  help?: ReactNode;
+  content: ReactNode;
+};
 
 /** Collapsible sections; collapsed ones show a one-line summary of their current values. */
 export function Sections({ sections, defaultOpen }: { sections: SectionDef[]; defaultOpen: string[] }) {
@@ -161,14 +225,23 @@ export function Sections({ sections, defaultOpen }: { sections: SectionDef[]; de
     <AccordionGroup type="multiple" value={open} onValueChange={setOpen}>
       {sections.map((s, i) => (
         <AccordionItem key={s.id} value={s.id} index={i}>
-          <AccordionTrigger>
-            <span className="flex min-w-0 flex-1 items-baseline justify-between gap-3">
-              <span className="shrink-0">{s.title}</span>
-              {s.summary && !open.includes(s.id) && (
-                <span className="truncate text-[12px] font-normal text-muted-foreground">{s.summary}</span>
-              )}
-            </span>
-          </AccordionTrigger>
+          {/* The "?" sits beside the trigger, not inside it: a button can't contain a button,
+              and clicking it shouldn't fold the section. */}
+          <div className="relative">
+            <AccordionTrigger>
+              <span className={cn("flex min-w-0 flex-1 items-baseline justify-between gap-3", s.help && "pr-7")}>
+                <span className="shrink-0">{s.title}</span>
+                {s.summary && !open.includes(s.id) && (
+                  <span className="truncate text-[12px] font-normal text-muted-foreground">{s.summary}</span>
+                )}
+              </span>
+            </AccordionTrigger>
+            {s.help && (
+              <div className="absolute right-8 top-1/2 z-20 -translate-y-1/2">
+                <HelpHint label={s.title}>{s.help}</HelpHint>
+              </div>
+            )}
+          </div>
           <AccordionContent>
             <div className="flex flex-col gap-3 pb-2">{s.content}</div>
           </AccordionContent>

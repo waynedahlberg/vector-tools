@@ -14,6 +14,7 @@ import { formatBytes } from "@/lib/format";
 import {
   GAP_STEPS,
   Help,
+  HelpList,
   NumberField,
   Panel,
   Reveal,
@@ -27,11 +28,6 @@ import {
 } from "./panel-kit";
 
 const OUTPUT_LABEL: Record<OutputGeometry, string> = { curves: "Curves", faces: "Flat faces", both: "Curves + faces" };
-const OUTPUT_HELP: Record<OutputGeometry, string> = {
-  curves: "Wireframe curves, one per closed or open path. Select them in Plasticity to extrude.",
-  faces: "Flat zero-thickness faces with holes already cut out, ready to extrude.",
-  both: "Curves and faces in one file.",
-};
 const ORIGIN_LABEL: Record<OriginMode, string> = { "bottom-left": "Bottom-left", center: "Center", svg: "SVG coordinates" };
 const SIZE_MODES: SizeMode[] = ["scale", "width", "height"];
 const ROTATIONS: Rotation[] = [0, 90, 180, 270];
@@ -78,6 +74,15 @@ export function OutputPanel({
       id: "output",
       title: "Output",
       summary: OUTPUT_LABEL[options.output],
+      help: (
+        <HelpList
+          items={[
+            ["Curves", "Wireframe curves, one per closed or open path. Select them in Plasticity to extrude."],
+            ["Flat faces", "Zero-thickness faces with holes already cut out, ready to extrude."],
+            ["Curves + faces", "Both in one file."],
+          ]}
+        />
+      ),
       content: (
         <>
           <RadioGroup value={options.output} onValueChange={(v) => onChange({ output: v as OutputGeometry })}>
@@ -85,7 +90,6 @@ export function OutputPanel({
             <RadioItem index={1} value="faces" label="Flat faces" />
             <RadioItem index={2} value="both" label="Curves + faces" />
           </RadioGroup>
-          <Help>{OUTPUT_HELP[options.output]}</Help>
         </>
       ),
     },
@@ -93,6 +97,15 @@ export function OutputPanel({
       id: "precision",
       title: "Curve precision",
       summary: options.curveMode === "spline" ? "Exact splines" : `Polylines, ${options.tolerance} ${unit}`,
+      help: (
+        <HelpList
+          items={[
+            ["Exact splines", "Béziers, lines and arcs become true B-spline curves with no loss of accuracy."],
+            ["Polylines", "Curves are flattened into straight segments within the tolerance."],
+            ["Exact circles & ellipses", "Keeps circles and ellipses as true STEP circles and ellipses instead of splines."],
+          ]}
+        />
+      ),
       content: (
         <>
           <TabsSubtle
@@ -103,11 +116,6 @@ export function OutputPanel({
             <TabsSubtleItem index={0} label="Exact splines" />
             <TabsSubtleItem index={1} label="Polylines" />
           </TabsSubtle>
-          <Help>
-            {options.curveMode === "spline"
-              ? "Béziers become true B-spline curves with no loss of accuracy."
-              : "Curves are flattened into straight segments within the tolerance."}
-          </Help>
           <Reveal show={options.curveMode === "polyline"}>
             <StepSlider
               label="Tolerance"
@@ -131,6 +139,7 @@ export function OutputPanel({
       id: "size",
       title: "Size & units",
       summary: sizeLabel ?? unit,
+      help: "Units, and how SVG units become real sizes: from the SVG's document size, pixels at a DPI, or 1 unit = 1 mm, times a scale factor. Or fit the drawing to an exact width or height.",
       content: (
         <>
           <TabsSubtle
@@ -209,6 +218,7 @@ export function OutputPanel({
       id: "transform",
       title: "Transform",
       summary: transformSummary,
+      help: "Rotates counter-clockwise, as seen in CAD, and mirrors the drawing.",
       content: (
         <>
           <TabsSubtle
@@ -229,6 +239,7 @@ export function OutputPanel({
       id: "placement",
       title: "Placement",
       summary: `${ORIGIN_LABEL[options.origin]}, ${options.plane.toUpperCase()}`,
+      help: "Where the origin sits and which plane the drawing lies on. Elements hidden in the SVG are left out unless included.",
       content: (
         <>
           <Select value={options.origin} onValueChange={(v) => onChange({ origin: v as OriginMode })}>
