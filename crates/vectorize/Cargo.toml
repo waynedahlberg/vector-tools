@@ -1,0 +1,28 @@
+[package]
+name = "vectorize"
+version = "0.1.0"
+edition = "2021"
+description = "Raster-to-vector tracing for svg2step: preprocessing plus VTracer's visioncortex core, compiled to WASM."
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# VTracer's clustering and curve fitting. Used directly (not the `vtracer` crate) so the build
+# doesn't pull in its CLI, file I/O and image decoders; decoding happens in the browser.
+visioncortex = "0.8.8"
+wasm-bindgen = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde-wasm-bindgen = "0.6"
+tsify = { version = "0.5.8", default-features = false, features = ["js"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O3"]

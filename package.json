@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "build:wasm": "PATH=\"$HOME/.cargo/bin:$PATH\" wasm-pack build crates/vectorize --release --target web --out-dir ../../src/lib/vectorize/wasm --out-name vectorize --no-pack && rm -f src/lib/vectorize/wasm/.gitignore",
+    "test:wasm": "PATH=\"$HOME/.cargo/bin:$PATH\" cargo test --release --manifest-path crates/vectorize/Cargo.toml"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

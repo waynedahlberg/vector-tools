@@ -20,8 +20,9 @@ function changedKeys<T extends object>(a: T, b: T): string {
  * needs: the source geometry is never modified.
  *
  * `onChange` runs after every committed change (set, undo, redo), from the event handler.
+ * Only an `active` history answers the keyboard shortcuts, so several can coexist.
  */
-export function useOptionsHistory<T extends object>(initial: T, onChange?: (value: T) => void) {
+export function useOptionsHistory<T extends object>(initial: T, onChange?: (value: T) => void, active = true) {
   const [state, setState] = useState<State<T>>({ past: [], present: initial, future: [] });
   // Handlers read the latest history from here; rendering reads `state`.
   const current = useRef(state);
@@ -76,6 +77,7 @@ export function useOptionsHistory<T extends object>(initial: T, onChange?: (valu
 
   // Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (or Ctrl+Y), except while typing in a field.
   useEffect(() => {
+    if (!active) return;
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
       const t = e.target as HTMLElement | null;
@@ -91,7 +93,7 @@ export function useOptionsHistory<T extends object>(initial: T, onChange?: (valu
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo]);
+  }, [undo, redo, active]);
 
   return {
     value: state.present,

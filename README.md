@@ -1,6 +1,6 @@
 # SVG to STEP
 
-Convert SVG artwork into 2D STEP (AP214) geometry for Plasticity or any CAD tool. Conversion runs entirely in the browser, so files are never uploaded. Conversion history, including the STEP files, is stored in the browser's IndexedDB.
+Convert SVG artwork into 2D STEP (AP214) geometry for Plasticity or any CAD tool, and trace raster images (PNG, JPEG, WebP, GIF, BMP, AVIF) into SVG paths first when you don't have vector artwork. Conversion runs entirely in the browser, so files are never uploaded. Conversion history, including the STEP files, is stored in the browser's IndexedDB.
 
 ## Run locally
 
@@ -17,11 +17,61 @@ Open http://localhost:3000.
 npm test
 ```
 
-Vitest runs the conversion pipeline in Node (xmldom stands in for the browser's `DOMParser`). The main fixture is `tests/fixtures/text_on_path_rocket2.svg`.
+Vitest runs the conversion pipeline in Node (xmldom stands in for the browser's `DOMParser`). The main fixture is `tests/fixtures/text_on_path_rocket2.svg`. The tracer's own Rust tests run with:
+
+```bash
+npm run test:wasm
+```
+
+### Rebuilding the tracer
+
+The image tracer is a Rust crate in `crates/vectorize`, compiled to WebAssembly. The build output in `src/lib/vectorize/wasm` is committed, so the app (and Vercel) build without Rust. After changing the crate, rebuild it with [rustup](https://rustup.rs), the `wasm32-unknown-unknown` target and [wasm-pack](https://rustwasm.github.io/wasm-pack/):
+
+```bash
+npm run build:wasm
+```
 
 ## Deploy to Vercel (free plan)
 
 The app is a single static page with no server code or environment variables. Import the repo in Vercel with the default Next.js settings, or run `npx vercel`.
+
+## Modes
+
+Switch with the two icons at the top left. Each mode keeps its own file and settings, and dropping a file anywhere opens it in the right mode (SVGs in SVG → STEP, images in Image → SVG).
+
+- **SVG → STEP** converts vector artwork to CAD geometry. Everything below the Image → SVG section describes this mode.
+- **Image → SVG** traces a raster image into coloured vector paths. Download the SVG, or **Continue to SVG → STEP** to convert the trace to CAD.
+
+## Image → SVG
+
+The left **Trace** panel sets how the image is read; the right **Result** panel shows the paths, nodes and colours produced, with the download and hand-off pinned at the bottom. The canvas pans (drag) and zooms (wheel, around the cursor); double-click fits. **Traced** shows the result, **Outlines** draws the paths over a faded original to judge the fit, and **Original** shows the image.
+
+| Option | What it does |
+| --- | --- |
+| Preset | Logo, Illustration, Line art or Photo. Changing any setting afterwards shows "Custom". |
+| Colours | **Colour** reduces the image to a fixed number of colours with k-means in OKLab (perceptually even), or groups colours by similarity when set to Auto (colour precision, gradient step). **Black & white** traces one ink colour below a luminance threshold, optionally the light areas instead. |
+| Clean up | Denoise (median filter) for JPEG noise and soft edges; remove specks under a size; the opacity below which pixels count as transparent. |
+| Curves | Smooth (Bézier), Polygon or Pixels. Corner threshold, segment length and splice angle control the fit. **Simplify** refits the traced curves with fewer nodes: straight edges become single lines and slightly rounded corners become sharp. |
+| Layering | **Cut out** (default) makes every colour region disjoint, which is what STEP faces and cutting need. **Stacked** layers shapes like paper cut-outs: fewer paths, but they overlap. |
+| Resolution | Auto enlarges small images to 1024 px and reduces large ones to 2048 px, which gives smoother curves at a bounded cost. Fixed sizes and the original size are also available. |
+| Colours (Result panel) | Click a colour to leave it out of the SVG, typically the background. |
+
+The SVG keeps the image's pixel size as its document size, so at 96 DPI one image pixel is 0.2646 mm in SVG → STEP; set the real size there with **Fit width** or **Fit height**.
+
+### How tracing works, and its limits
+
+Tracing uses the clustering and curve fitting of [VTracer](https://github.com/visioncortex/vtracer) (visioncortex, MIT/Apache-2.0), with preprocessing and output of its own:
+
+1. The file's header is read before decoding, and images over 100 megapixels (or 32,768 px a side, or 50 MB) are refused, so a small file that decodes to a huge bitmap can't exhaust memory. The browser then decodes straight to the working resolution.
+2. Pixels are thresholded for transparency, median-filtered, then quantized. Anti-aliasing pixels on edges are left out of the k-means sample and colours that only blend two others are merged, so edges don't become thin extra shapes.
+3. VTracer clusters the colours hierarchically and fits curves. Layer colours are snapped back to the palette, so they're exact.
+4. Simplify refits the result with the same curve fitter as SVG → STEP's curve cleanup.
+
+Tracing suits logos, icons, flat illustrations and line art. Photos work but become many paths, like posterised art.
+
+### Safety
+
+Everything runs in the browser; images are never uploaded. Tracing runs in a dedicated Web Worker, so the page never blocks. The tracer is Rust compiled to WebAssembly: memory-safe, with no image decoder of its own, and its options and results are typed across the boundary (TypeScript types are generated from the Rust structs) and clamped on both sides. WebAssembly memory can grow but never shrink, so the worker is disposable: a newer request, a 90-second timeout, a crash, or memory above 512 MB terminates it, which frees everything, and a fresh one starts on the next trace. Traces over 1.5 million points are refused as too detailed. The SVG is written from numbers and validated colours only.
 
 ## Layout
 
@@ -71,4 +121,12 @@ The conversion is a chain of memoised stages in `src/lib/convert.ts`: parse → 
 - `src/lib/fit.ts`: Schneider curve fitting; `src/lib/cleanup.ts`, `src/lib/outline.ts` build on it (outlines use [Clipper2](https://github.com/countertype/clipper2-ts))
 - `src/lib/step-writer.ts`: ISO 10303-21 writer
 - `src/lib/history.ts`: IndexedDB history
+
+Image → SVG:
+
+- `crates/vectorize`: the Rust tracer (preprocessing in `preprocess.rs`, VTracer clustering and path output in `trace.rs`, the typed boundary in `types.rs`)
+- `src/lib/vectorize/worker.ts`, `client.ts`, `protocol.ts`: the worker, its lifecycle (cancel, timeout, recycling) and messages
+- `src/lib/vectorize/image-header.ts`: reads image sizes from file headers without decoding
+- `src/lib/vectorize/settings.ts`, `simplify.ts`, `svg.ts`: settings and presets, node reduction, SVG output
+- `src/components/app/vectorize/`: the panels, the canvas and the `useVectorizer` hook
 - `src/components/app/*`: UI, built on [Fluid Functionalism](https://www.fluidfunctionalism.com) components in `src/components/ui`

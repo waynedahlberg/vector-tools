@@ -17,20 +17,27 @@ export async function readSvgFile(file: File): Promise<LoadedFile> {
   return { name: file.name, svg: await file.text() };
 }
 
-export function SvgFileInput({
+const SVG_ACCEPT = ".svg,image/svg+xml";
+
+/** A hidden file picker. `read` checks and loads the chosen file; its errors go to `onError`. */
+export function FileInput<T>({
   inputRef,
+  accept,
+  read,
   onFile,
   onError,
 }: {
   inputRef: React.RefObject<HTMLInputElement | null>;
-  onFile: (f: LoadedFile) => void;
+  accept: string;
+  read: (f: File) => T | Promise<T>;
+  onFile: (f: T) => void;
   onError: (msg: string) => void;
 }) {
   return (
     <input
       ref={inputRef}
       type="file"
-      accept=".svg,image/svg+xml"
+      accept={accept}
       className="sr-only"
       tabIndex={-1}
       onChange={async (e) => {
@@ -38,7 +45,7 @@ export function SvgFileInput({
         e.target.value = "";
         if (!file) return;
         try {
-          onFile(await readSvgFile(file));
+          onFile(await read(file));
         } catch (err) {
           onError((err as Error).message);
         }
@@ -47,13 +54,36 @@ export function SvgFileInput({
   );
 }
 
-/** The empty state: a drop target that fills its container. */
-export function Dropzone({
-  onFile,
-  onError,
-}: {
+export function SvgFileInput(props: {
+  inputRef: React.RefObject<HTMLInputElement | null>;
   onFile: (f: LoadedFile) => void;
   onError: (msg: string) => void;
+}) {
+  return <FileInput {...props} accept={SVG_ACCEPT} read={readSvgFile} />;
+}
+
+type DropzoneCopy = { title: string; dropping: string; detail: string; ariaLabel: string };
+
+const SVG_COPY: DropzoneCopy = {
+  title: "Drop an SVG file here",
+  dropping: "Release to load the SVG",
+  detail: "Paths, shapes, and groups are converted in your browser. Nothing is uploaded.",
+  ariaLabel: "Drop an SVG file here, or press Enter to choose one",
+};
+
+/** The empty state: a drop target that fills its container. Defaults to SVG files. */
+export function Dropzone<T = LoadedFile>({
+  onFile,
+  onError,
+  accept = SVG_ACCEPT,
+  read = readSvgFile as unknown as (f: File) => T | Promise<T>,
+  copy = SVG_COPY,
+}: {
+  onFile: (f: T) => void;
+  onError: (msg: string) => void;
+  accept?: string;
+  read?: (f: File) => T | Promise<T>;
+  copy?: DropzoneCopy;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -66,7 +96,7 @@ export function Dropzone({
     const file = e.dataTransfer.files?.[0];
     if (!file) return;
     try {
-      onFile(await readSvgFile(file));
+      onFile(await read(file));
     } catch (err) {
       onError((err as Error).message);
     }
@@ -76,7 +106,7 @@ export function Dropzone({
     <motion.div
       role="button"
       tabIndex={0}
-      aria-label="Drop an SVG file here, or press Enter to choose one"
+      aria-label={copy.ariaLabel}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
@@ -112,11 +142,9 @@ export function Dropzone({
       </motion.div>
       <div className="flex flex-col gap-1.5">
         <p className="text-[15px] font-medium text-foreground">
-          {dragging ? "Release to load the SVG" : "Drop an SVG file here"}
+          {dragging ? copy.dropping : copy.title}
         </p>
-        <p className="text-[13px] text-muted-foreground">
-          Paths, shapes, and groups are converted in your browser. Nothing is uploaded.
-        </p>
+        <p className="text-[13px] text-muted-foreground">{copy.detail}</p>
       </div>
       <Button
         variant="secondary"
@@ -127,7 +155,7 @@ export function Dropzone({
       >
         Choose file
       </Button>
-      <SvgFileInput inputRef={inputRef} onFile={onFile} onError={onError} />
+      <FileInput inputRef={inputRef} accept={accept} read={read} onFile={onFile} onError={onError} />
     </motion.div>
   );
 }
